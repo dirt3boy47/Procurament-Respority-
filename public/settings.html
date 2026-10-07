@@ -1,0 +1,103 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Settings — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <div id="msg"></div>
+  <div class="card">
+    <h2>Procurement categories &amp; lead times</h2>
+    <p class="small-copy">Which register assets get ordered, and how far ahead. Order-by = need date − lead time − buffer.
+      A BOM line can override the lead time for a long-lead item. Only admins can change these.</p>
+    <div class="table-wrap" style="max-height:none"><table class="data" id="cats">
+      <thead><tr><th>Code</th><th>Name</th><th>Register</th><th>Asset type</th><th>Material</th><th class="num">Lead time (d)</th>
+        <th class="num">Buffer (d)</th><th>Active</th><th>Notes</th><th></th></tr></thead><tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>General</h2>
+    <div class="table-wrap"><table class="data" id="settings"><thead><tr><th>Setting</th><th>Value</th><th>What it does</th><th></th></tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>Suppliers</h2>
+    <div class="table-wrap" style="max-height:none"><table class="data" id="sups">
+      <thead><tr><th>Name</th><th>Contact</th><th>Email</th><th>Phone</th><th>Notes</th><th>Active</th><th></th></tr></thead><tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Activity log</h2>
+    <div class="table-wrap"><table class="data" id="audit"><thead><tr><th>When</th><th>Who</th><th>Action</th><th>Record</th><th>Detail</th></tr></thead><tbody></tbody></table></div>
+  </div>
+</main>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  const msg = P.$('#msg');
+  const admin = P.can('admin');
+  const edit = P.can('edit');
+  const dis = (ok) => (ok ? '' : 'disabled');
+  const val = (tr, f) => {
+    const el = tr.querySelector(`[data-f="${f}"]`);
+    return el.type === 'checkbox' ? el.checked : el.value;
+  };
+  const wrapSave = (fn) => async (ev) => {
+    const tr = ev.target.closest('tr');
+    try { await fn(tr); P.flash(msg, 'Saved.'); await load(); } catch (e) { P.flash(msg, e.message, 'err'); window.scrollTo(0, 0); }
+  };
+
+  async function load() {
+    const [look, sups, audit] = await Promise.all([P.call('lookups'), P.call('suppliers.list'), P.call('audit.list', { limit: 200 })]);
+    const inp = (f, v, ok, extra = '') => `<input data-f="${f}" value="${P.esc(v ?? '')}" ${dis(ok)} ${extra}>`;
+    P.$('#cats tbody').innerHTML = [...look.categories, { _new: true }].map((c) => `<tr class="nolink">
+      <td>${c._new ? inp('code', '', admin, 'placeholder="NEW" style="width:90px"') : `<b>${P.esc(c.code)}</b><input type="hidden" data-f="code" value="${P.esc(c.code)}">`}</td>
+      <td>${inp('name', c.name, admin, 'style="min-width:180px"')}</td><td>${inp('register', c.register, admin, 'style="width:110px"')}</td>
+      <td>${inp('asset_type', c.asset_type, admin, 'style="width:80px"')}</td><td>${inp('material', c.material, admin, 'style="width:80px"')}</td>
+      <td>${inp('lead_time_days', c.lead_time_days, admin, 'type="number" min="0" style="width:80px;text-align:right"')}</td>
+      <td>${inp('buffer_days', c.buffer_days, admin, 'type="number" min="0" style="width:70px;text-align:right"')}</td>
+      <td><input type="checkbox" data-f="active" ${c._new || c.active ? 'checked' : ''} ${dis(admin)} style="width:auto"></td>
+      <td>${inp('notes', c.notes, admin, 'style="min-width:220px"')}<input type="hidden" data-f="sort_order" value="${c.sort_order ?? 100}"></td>
+      <td>${admin ? `<button class="btn secondary" type="button">${c._new ? 'Add' : 'Save'}</button>` : ''}</td></tr>`).join('');
+    P.$('#cats tbody').querySelectorAll('button').forEach((b) => b.addEventListener('click', wrapSave(async (tr) => {
+      const p = {};
+      ['code', 'name', 'register', 'asset_type', 'material', 'lead_time_days', 'buffer_days', 'active', 'notes', 'sort_order'].forEach((f) => (p[f] = val(tr, f)));
+      await P.call('category.save', p);
+    })));
+
+    P.$('#settings tbody').innerHTML = Object.entries(look.settings).map(([k, v]) => `<tr class="nolink"><td><b>${P.esc(k)}</b><input type="hidden" data-f="key" value="${P.esc(k)}"></td>
+      <td>${inp('value', v, admin, 'style="width:100px"')}</td><td class="wrap muted"></td>
+      <td>${admin ? '<button class="btn secondary" type="button">Save</button>' : ''}</td></tr>`).join('');
+    P.$('#settings tbody').querySelectorAll('button').forEach((b) => b.addEventListener('click', wrapSave(async (tr) => {
+      await P.call('setting.save', { key: val(tr, 'key'), value: val(tr, 'value') });
+    })));
+    const help = { lookahead_days: 'Order-by dates within this many days show as "Order now".', forecast_weeks: 'Weeks shown on the dashboard forecast.' };
+    P.$('#settings tbody').querySelectorAll('tr').forEach((tr) => (tr.children[2].textContent = help[val(tr, 'key')] || ''));
+
+    P.$('#sups tbody').innerHTML = [...sups.rows, { _new: true }].map((s) => `<tr class="nolink">
+      <td>${inp('name', s.name, edit, `style="min-width:180px" ${s._new ? 'placeholder="New supplier"' : ''}`)}<input type="hidden" data-f="id" value="${s.id ?? ''}"></td>
+      <td>${inp('contact_name', s.contact_name, edit)}</td><td>${inp('email', s.email, edit)}</td><td>${inp('phone', s.phone, edit, 'style="width:120px"')}</td>
+      <td>${inp('notes', s.notes, edit)}</td><td><input type="checkbox" data-f="active" ${s._new || s.active ? 'checked' : ''} ${dis(edit)} style="width:auto"></td>
+      <td>${edit ? `<button class="btn secondary" type="button">${s._new ? 'Add' : 'Save'}</button>` : ''}</td></tr>`).join('');
+    P.$('#sups tbody').querySelectorAll('button').forEach((b) => b.addEventListener('click', wrapSave(async (tr) => {
+      const p = {};
+      ['id', 'name', 'contact_name', 'email', 'phone', 'notes', 'active'].forEach((f) => (p[f] = val(tr, f)));
+      if (!p.id) delete p.id;
+      await P.call('supplier.save', p);
+    })));
+
+    P.$('#audit tbody').innerHTML = audit.rows.map((a) => `<tr class="nolink"><td>${P.dateTime(a.at)}</td><td>${P.esc(a.user_email)}</td>
+      <td>${P.esc(a.action)}</td><td>${P.esc(`${a.entity || ''} ${a.entity_id || ''}`)}</td><td class="wrap muted">${P.esc(JSON.stringify(a.details))}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="5" class="muted">Nothing yet.</td></tr>';
+  }
+  await load().catch((e) => P.flash(msg, e.message, 'err'));
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

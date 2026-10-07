@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purchase orders — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <div class="card">
+    <h2>Purchase orders</h2>
+    <div class="toolbar">
+      <div class="field"><label for="fStatus">Status</label><select id="fStatus"></select></div>
+      <div class="field grow"><label for="fSearch">Search</label><input id="fSearch" placeholder="PO number or supplier"></div>
+      <div class="field" data-perm="edit"><label>&nbsp;</label><a class="btn" href="/po.html">New purchase order</a></div>
+    </div>
+    <div class="table-wrap"><table class="data" id="pos">
+      <thead><tr><th>PO number</th><th>Supplier</th><th>Status</th><th>Category</th><th>Order date</th><th>Expected</th>
+        <th class="num">Lines</th><th class="num">Assets</th><th class="num">Received</th><th class="num">Value</th><th>Raised by</th></tr></thead>
+      <tbody><tr class="nolink"><td colspan="11" class="loading">Loading…</td></tr></tbody>
+    </table></div>
+    <div class="count" id="count"></div>
+  </div>
+</main>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  P.$('#fStatus').innerHTML = P.options(['DRAFT', 'ISSUED', 'PART_RECEIVED', 'RECEIVED', 'CANCELLED'].map((s) => [s, P.STATUS[s]]), P.q('status'), { blank: 'All' });
+  let rows = [];
+  async function load() {
+    rows = (await P.call('pos.list', { status: P.$('#fStatus').value })).rows;
+    render();
+  }
+  function render() {
+    const s = P.$('#fSearch').value.trim().toLowerCase();
+    const list = rows.filter((r) => !s || `${r.po_number} ${r.supplier || ''}`.toLowerCase().includes(s));
+    P.$('#pos tbody').innerHTML = list.map((r) => `<tr onclick="location.href='/po.html?id=${r.id}'">
+      <td><b>${P.esc(r.po_number)}</b></td><td>${P.esc(r.supplier || '—')}</td><td>${P.status(r.status)}</td><td>${P.esc(r.category_code || '')}</td>
+      <td>${P.date(r.order_date)}</td><td>${P.date(r.expected_date)}</td><td class="num">${r.line_count}</td><td class="num">${r.asset_count}</td>
+      <td class="num">${r.qty ? Math.round((100 * r.qty_received) / r.qty) + '%' : ''}</td><td class="num">${r.value ? P.money(r.value) : ''}</td>
+      <td>${P.esc(r.created_by || '')}</td></tr>`).join('') || '<tr class="nolink"><td colspan="11" class="muted">No purchase orders yet.</td></tr>';
+    P.$('#count').textContent = `${list.length} purchase order(s)`;
+  }
+  P.$('#fStatus').addEventListener('change', load);
+  P.$('#fSearch').addEventListener('input', render);
+  load();
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

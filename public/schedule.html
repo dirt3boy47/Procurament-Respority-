@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Order schedule — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <div class="card">
+    <h2>Order schedule</h2>
+    <p class="small-copy">Every valve, pit and fitting in the asset register that is in an active procurement category. The
+      <b>need date</b> is the earliest planned start of the programme activities linked to the asset (or your override);
+      <b>order by</b> = need date − lead time − buffer.</p>
+    <div class="toolbar">
+      <div class="field"><label for="fSection">Section</label><select id="fSection"></select></div>
+      <div class="field"><label for="fCategory">Category</label><select id="fCategory"></select></div>
+      <div class="field"><label for="fStatus">Status</label><select id="fStatus"></select></div>
+      <div class="field"><label for="fHorizon">Order by within</label>
+        <select id="fHorizon"><option value="">Any time</option><option value="28">4 weeks</option><option value="56">8 weeks</option>
+          <option value="84">12 weeks</option><option value="182">26 weeks</option></select></div>
+      <div class="field grow"><label for="fSearch">Search</label><input id="fSearch" placeholder="Asset, assembly or PO number"></div>
+      <div class="field"><label for="fView">View</label>
+        <select id="fView"><option value="list">Asset list</option><option value="group">Grouped by order week</option></select></div>
+      <div class="field"><label>&nbsp;</label><button class="btn secondary" id="csvBtn" type="button">Export CSV</button></div>
+    </div>
+    <div class="toolbar" style="margin-top:-4px">
+      <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="fInstalled" style="width:auto"> Show installed</label>
+      <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="fUnconfirmed" style="width:auto"> Only ordered with BOM not confirmed</label>
+      <span id="weekNote" class="muted" style="font-size:12px"></span>
+    </div>
+    <div id="msg"></div>
+    <div class="table-wrap" id="wrap"><div class="loading">Loading…</div></div>
+    <div class="count" id="count"></div>
+    <div class="selbar" id="selbar">
+      <span id="selText"></span>
+      <span><button class="btn" id="clearSel" type="button" style="background:transparent;color:#fff;border:1px solid #ffffff66">Clear</button>
+        <button class="btn" id="makePo" type="button">Create PO from selected</button></span>
+    </div>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  const look = await P.call('lookups');
+  const st = ['OVERDUE', 'ORDER_NOW', 'PART_ORDERED', 'PLANNED', 'ORDERED', 'RECEIVED', 'NO_BOM', 'NO_DATE', 'ON_HOLD', 'INSTALLED'];
+  P.$('#fSection').innerHTML = P.options(look.sections, P.q('section'), { blank: 'All sections' });
+  P.$('#fCategory').innerHTML = P.options(look.categories.filter((c) => c.active).map((c) => [c.code, c.name]), P.q('category'), { blank: 'All categories' });
+  P.$('#fStatus').innerHTML = P.options(st.map((s) => [s, P.STATUS[s]]), P.q('status'), { blank: 'All statuses' });
+  P.$('#fUnconfirmed').checked = P.q('unconfirmed') === '1';
+  let week = P.q('week');
+  const selected = new Set();
+  let rows = [];
+  let shown = [];
+
+  async function load() {
+    P.$('#wrap').innerHTML = '<div class="loading">Loading…</div>';
+    try {
+      const res = await P.call('requirements', {
+        section: P.$('#fSection').value, category: P.$('#fCategory').value, status: P.$('#fStatus').value,
+        horizonDays: P.$('#fHorizon').value || null, includeInstalled: P.$('#fInstalled').checked,
+      });
+      rows = res.rows;
+      render();
+    } catch (e) { P.flash(P.$('#msg'), e.message, 'err'); }
+  }
+
+  function filtered() {
+    const s = P.$('#fSearch').value.trim().toLowerCase();
+    let out = rows;
+    if (s) out = out.filter((r) => [r.record_key, r.assembly_key, r.po_numbers].some((v) => String(v || '').toLowerCase().includes(s)));
+    if (P.$('#fUnconfirmed').checked) out = out.filter((r) => ['ORDERED', 'RECEIVED'].includes(r.status) && !r.bom_confirmed);
+    if (week) {
+      const end = new Date(week + 'T00:00:00Z'); end.setUTCDate(end.getUTCDate() + 6);
+      const e = end.toISOString().slice(0, 10);
+      out = out.filter((r) => r.order_by_date && r.order_by_date >= week && r.order_by_date <= e);
+      P.$('#weekNote').innerHTML = `Order-by week of ${P.date(week)} · <a href="#" id="clearWeek">clear</a>`;
+      P.$('#clearWeek').onclick = (ev) => { ev.preventDefault(); week = null; P.$('#weekNote').innerHTML = ''; render(); };
+    }
+    return out;
+  }
+
+  const selectable = (r) => P.can('edit') && !['INSTALLED', 'RECEIVED', 'ORDERED', 'NO_BOM'].includes(r.status);
+
+  function bomCell(r) {
+    if (!r.template_id) return P.status('NO_BOM');
+    const lines = `${r.lines_ordered}/${r.bom_lines} lines ordered`;
+    const conf = r.bom_confirmed ? '<span class="check-ok" title="BOM order confirmed">✓ confirmed</span>'
+      : r.bom_confirmation_stale ? '<span class="pill warnflag">re-check</span>' : '';
+    return `${P.status(r.template_status)} <span class="muted">${lines}</span> ${conf}`;
+  }
+
+  function renderList(list) {
+    P.$('#wrap').innerHTML = `<table class="data"><thead><tr>
+      <th>${P.can('edit') ? '<input type="checkbox" id="selAll" style="width:auto" title="Select all orderable">' : ''}</th>
+      <th>Asset</th><th>Section</th><th class="num">Chainage</th><th>Category</th><th>Assembly</th>
+      <th>Need on site</th><th class="num">Lead + buffer</th><th>Order by</th><th>Status</th><th>BOM</th><th>POs</th></tr></thead>
+      <tbody>${list.map((r) => `
+        <tr data-key="${P.esc(r.record_key)}" class="${selected.has(r.record_key) ? 'sel' : ''}">
+          <td>${selectable(r) ? `<input type="checkbox" class="sel" style="width:auto" ${selected.has(r.record_key) ? 'checked' : ''}>` : ''}</td>
+          <td><b>${P.esc(r.record_key)}</b>${r.on_hold ? ' <span class="pill s-ON_HOLD">hold</span>' : ''}</td>
+          <td>${P.esc(r.section)}</td><td class="num">${P.num(r.chainage)}</td><td>${P.esc(r.category_code)}</td>
+          <td>${P.esc(r.assembly_key)}</td>
+          <td>${P.date(r.need_date)}${r.need_date_override ? ' <span class="muted" title="Manual override">(ovr)</span>' : ''}</td>
+          <td class="num">${r.effective_lead_days}+${r.buffer_days}d</td>
+          <td class="nowrap">${P.date(r.order_by_date)} <span class="muted">${P.relDays(r.order_by_date)}</span></td>
+          <td>${P.status(r.status)}</td><td>${bomCell(r)}</td><td>${P.esc(r.po_numbers || '')}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="12" class="muted">No assets match these filters.</td></tr>'}</tbody></table>`;
+    P.$('#wrap').querySelectorAll('tbody tr[data-key]').forEach((tr) => {
+      tr.addEventListener('click', (ev) => {
+        const key = tr.dataset.key;
+        if (ev.target.classList.contains('sel')) {
+          ev.target.checked ? selected.add(key) : selected.delete(key);
+          tr.classList.toggle('sel', ev.target.checked);
+          updateSel();
+          return;
+        }
+        location.href = '/asset.html?key=' + encodeURIComponent(key);
+      });
+    });
+    const all = P.$('#selAll');
+    if (all) all.addEventListener('change', () => {
+      list.filter(selectable).forEach((r) => (all.checked ? selected.add(r.record_key) : selected.delete(r.record_key)));
+      render();
+    });
+  }
+
+  function renderGroups(list) {
+    const groups = new Map();
+    const monday = (iso) => { const t = new Date(iso + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
+    for (const r of list) {
+      if (['INSTALLED', 'RECEIVED', 'ORDERED'].includes(r.status)) continue;
+      const wk = r.order_by_date ? (r.order_by_date < P.today() ? 'OVERDUE' : monday(r.order_by_date)) : 'NO_DATE';
+      const k = wk + '|' + r.assembly_key;
+      if (!groups.has(k)) groups.set(k, { wk, assembly: r.assembly_key, category: r.category_code, rows: [] });
+      groups.get(k).rows.push(r);
+    }
+    const order = (g) => (g.wk === 'OVERDUE' ? '0' : g.wk === 'NO_DATE' ? '9' : '1' + g.wk);
+    const sorted = [...groups.values()].sort((a, b) => order(a).localeCompare(order(b)) || a.assembly.localeCompare(b.assembly));
+    P.$('#wrap').innerHTML = `<table class="data"><thead><tr><th>Order in week</th><th>Category</th><th>Assembly</th><th class="num">Assets</th>
+      <th>Earliest need</th><th>Assets</th><th></th></tr></thead><tbody>${sorted.map((g, i) => `
+      <tr class="nolink"><td class="nowrap">${g.wk === 'OVERDUE' ? '<b class="check-bad">Overdue</b>' : g.wk === 'NO_DATE' ? 'No date' : 'w/c ' + P.date(g.wk)}</td>
+        <td>${P.esc(g.category)}</td><td>${P.esc(g.assembly)}</td><td class="num">${g.rows.length}</td>
+        <td>${P.date(g.rows.map((r) => r.need_date).filter(Boolean).sort()[0])}</td>
+        <td class="wrap" style="max-width:420px">${g.rows.map((r) => `<a href="/asset.html?key=${encodeURIComponent(r.record_key)}">${P.esc(r.record_key)}</a>`).join(', ')}</td>
+        <td>${P.can('edit') ? `<button class="btn secondary" data-g="${i}" type="button">Select</button>` : ''}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="7" class="muted">Nothing left to order for these filters.</td></tr>'}</tbody></table>`;
+    P.$('#wrap').querySelectorAll('button[data-g]').forEach((b) => b.addEventListener('click', () => {
+      sorted[b.dataset.g].rows.filter(selectable).forEach((r) => selected.add(r.record_key));
+      updateSel();
+    }));
+  }
+
+  function updateSel() {
+    P.$('#selbar').classList.toggle('show', selected.size > 0);
+    P.$('#selText').textContent = `${selected.size} asset(s) selected`;
+  }
+
+  function render() {
+    shown = filtered();
+    P.$('#fView').value === 'group' ? renderGroups(shown) : renderList(shown);
+    P.$('#count').textContent = `${shown.length} asset(s)`;
+    updateSel();
+  }
+
+  ['#fSection', '#fCategory', '#fStatus', '#fHorizon', '#fInstalled'].forEach((s) => P.$(s).addEventListener('change', load));
+  ['#fUnconfirmed', '#fView'].forEach((s) => P.$(s).addEventListener('change', render));
+  P.$('#fSearch').addEventListener('input', render);
+  P.$('#clearSel').addEventListener('click', () => { selected.clear(); render(); });
+  P.$('#makePo').addEventListener('click', () => {
+    location.href = '/po.html?assets=' + encodeURIComponent([...selected].join(','));
+  });
+  P.$('#csvBtn').addEventListener('click', () => {
+    P.csv(`t2w-order-schedule-${P.today()}.csv`,
+      ['Record key', 'Section', 'Chainage', 'Category', 'Assembly', 'Need date', 'Need activity', 'Lead days', 'Buffer days', 'Order by', 'Status', 'BOM template', 'BOM lines', 'Lines ordered', 'Lines received', 'BOM confirmed', 'POs'],
+      shown.map((r) => [r.record_key, r.section, r.chainage, r.category_code, r.assembly_key, r.need_date, r.need_activity_id, r.effective_lead_days,
+        r.buffer_days, r.order_by_date, P.STATUS[r.status] || r.status, r.template_status, r.bom_lines, r.lines_ordered, r.lines_received,
+        r.bom_confirmed ? 'Yes' : 'No', r.po_numbers]));
+  });
+  load();
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

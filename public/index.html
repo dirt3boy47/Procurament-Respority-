@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Dashboard — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+<style>
+  /* Categorical slots (validated reference order) — one per procurement category, fixed by sort order. */
+  .viz { --series-1:#2a78d6; --series-2:#eb6834; --series-3:#1baf7a; --series-4:#eda100;
+         --series-5:#e87ba4; --series-6:#008300; --series-7:#4a3aa7; --series-8:#e34948; }
+  .forecast .seg { border-top: 2px solid var(--panel); }
+  .forecast .stack .seg:last-child { border-radius: 4px 4px 0 0; }
+  .forecast .col:hover .stack { opacity: .85; }
+  .forecast .col.overdue .lbl { color: var(--warn); font-weight: 600; }
+</style>
+</head>
+<body>
+<main>
+  <div class="card">
+    <h2>What needs ordering</h2>
+    <div class="grid cols-4" id="kpis"><div class="loading">Loading…</div></div>
+  </div>
+
+  <div class="card viz">
+    <h2>Order-by forecast — assets still to order, by week</h2>
+    <p class="small-copy">Each bar is the number of assets whose order-by date (need date − lead time − buffer) falls in that week.
+      Click a bar to open that week in the order schedule.</p>
+    <div class="forecast" id="forecast"></div>
+    <div class="legend" id="legend"></div>
+    <details style="margin-top:10px"><summary class="muted" style="font-size:12px;cursor:pointer">Show as table</summary>
+      <div class="table-wrap" style="margin-top:8px"><table class="data" id="forecastTable"></table></div>
+    </details>
+  </div>
+
+  <div class="card">
+    <h2>Order now — overdue, due within the lookahead, or part ordered</h2>
+    <div class="table-wrap"><table class="data" id="urgent">
+      <thead><tr><th>Asset</th><th>Section</th><th class="num">Chainage</th><th>Assembly</th><th>Need on site</th>
+        <th>Order by</th><th>Status</th><th>BOM</th><th>POs</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="count" id="urgentCount"></div>
+  </div>
+
+  <div class="card">
+    <h2>Purchase orders</h2>
+    <div class="grid cols-4" id="poKpis"></div>
+  </div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  const [d, look] = await Promise.all([P.call('dashboard'), P.call('lookups')]);
+  const c = d.counts;
+  const kpi = (label, value, cls, href, sub = '') => `
+    <div class="kpi link" onclick="location.href='${href}'">
+      <div class="label">${label}</div><div class="value ${cls}">${P.num(value || 0)}</div><div class="count">${sub}</div></div>`;
+  P.$('#kpis').innerHTML = [
+    kpi('Overdue to order', c.OVERDUE, 'warn', '/schedule.html?status=OVERDUE', 'order-by date has passed'),
+    kpi('Order now', c.ORDER_NOW, 'accent', '/schedule.html?status=ORDER_NOW', `order-by within ${look.settings.lookahead_days} days`),
+    kpi('Part ordered', c.PART_ORDERED, 'accent', '/schedule.html?status=PART_ORDERED', 'some BOM lines still open'),
+    kpi('Planned', c.PLANNED, '', '/schedule.html?status=PLANNED', 'not due to order yet'),
+    kpi('Ordered (awaiting delivery)', c.ORDERED, '', '/schedule.html?status=ORDERED'),
+    kpi('Received', c.RECEIVED, '', '/schedule.html?status=RECEIVED'),
+    kpi('No BOM', c.NO_BOM, '', '/schedule.html?status=NO_BOM', `${d.draftTemplatesInUse} BOM template(s) still draft`),
+    kpi('Ordered, BOM not confirmed', d.awaitingBomConfirmation, d.awaitingBomConfirmation ? 'accent' : '', '/schedule.html?unconfirmed=1', 'needs a BOM check sign-off'),
+  ].join('');
+
+  // ---- forecast (stacked by category, fixed category order) ----
+  const cats = look.categories.filter((x) => x.active);
+  const color = Object.fromEntries(cats.map((x, i) => [x.code, `var(--series-${(i % 8) + 1})`]));
+  const monday = (iso) => { const t = new Date(iso + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() - ((t.getUTCDay() + 6) % 7)); return t.toISOString().slice(0, 10); };
+  const weeks = [null];
+  let w = monday(P.today());
+  for (let i = 0; i < d.forecastWeeks; i++) {
+    weeks.push(w);
+    const t = new Date(w + 'T00:00:00Z'); t.setUTCDate(t.getUTCDate() + 7); w = t.toISOString().slice(0, 10);
+  }
+  const cell = {};
+  for (const r of d.forecast) {
+    const key = r.week && r.week < weeks[1] ? null : r.week;
+    if (key && !weeks.includes(key)) continue;
+    cell[key] = cell[key] || {};
+    cell[key][r.category_code] = (cell[key][r.category_code] || 0) + r.n;
+  }
+  const totals = weeks.map((wk) => Object.values(cell[wk] || {}).reduce((a, b) => a + b, 0));
+  const max = Math.max(1, ...totals);
+  const labelOf = (wk) => (wk ? P.date(wk).replace(/ \d\d$/, '') : 'Overdue');
+  P.$('#forecast').innerHTML = weeks.map((wk, i) => {
+    const segs = cats.filter((x) => cell[wk]?.[x.code]).map((x) =>
+      `<div class="seg" style="height:${(cell[wk][x.code] / max) * 120}px;background:${color[x.code]}"
+         title="${P.esc(labelOf(wk))} — ${P.esc(x.name)}: ${cell[wk][x.code]}"></div>`).join('');
+    const href = wk ? `/schedule.html?week=${wk}` : '/schedule.html?status=OVERDUE';
+    return `<div class="col ${wk ? '' : 'overdue'}" onclick="location.href='${href}'" title="${P.esc(labelOf(wk))}: ${totals[i]} asset(s)">
+      <div class="n">${totals[i] || ''}</div><div class="stack">${segs}</div><div class="lbl">${P.esc(labelOf(wk))}</div></div>`;
+  }).join('');
+  P.$('#legend').innerHTML = cats.map((x) => `<span><i style="background:${color[x.code]}"></i>${P.esc(x.name)}</span>`).join('');
+  P.$('#forecastTable').innerHTML = `<thead><tr><th>Week</th>${cats.map((x) => `<th class="num">${P.esc(x.code)}</th>`).join('')}<th class="num">Total</th></tr></thead>
+    <tbody>${weeks.map((wk, i) => totals[i] ? `<tr class="nolink"><td>${P.esc(labelOf(wk))}</td>${cats.map((x) => `<td class="num">${cell[wk]?.[x.code] || ''}</td>`).join('')}<td class="num">${totals[i]}</td></tr>` : '').join('')}</tbody>`;
+
+  // ---- urgent list ----
+  P.$('#urgent tbody').innerHTML = d.urgent.map((r) => `
+    <tr onclick="location.href='/asset.html?key=${encodeURIComponent(r.record_key)}'">
+      <td><b>${P.esc(r.record_key)}</b></td><td>${P.esc(r.section)}</td><td class="num">${P.num(r.chainage)}</td>
+      <td>${P.esc(r.assembly_key)}</td><td>${P.date(r.need_date)}</td>
+      <td>${P.date(r.order_by_date)} <span class="muted">${P.relDays(r.order_by_date)}</span></td>
+      <td>${P.status(r.status)}</td><td>${P.status(r.template_status || 'NO_BOM')}</td><td>${P.esc(r.po_numbers || '')}</td></tr>`).join('')
+    || '<tr class="nolink"><td colspan="9" class="muted">Nothing due — all clear.</td></tr>';
+  P.$('#urgentCount').textContent = `${d.urgent.length} asset(s)` + (d.urgent.length >= 60 ? ' (first 60 — see the order schedule for all)' : '');
+
+  // ---- POs ----
+  const po = Object.fromEntries(d.purchaseOrders.map((r) => [r.status, r]));
+  const pk = (s, label) => `<div class="kpi link" onclick="location.href='/pos.html?status=${s}'"><div class="label">${label}</div>
+      <div class="value">${P.num(po[s]?.n || 0)}</div><div class="count">${po[s]?.value ? P.money(po[s].value) : ''}</div></div>`;
+  P.$('#poKpis').innerHTML = pk('DRAFT', 'Draft') + pk('ISSUED', 'Issued') + pk('PART_RECEIVED', 'Part received') + pk('RECEIVED', 'Received');
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

@@ -1,0 +1,212 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Purchase order — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <p><a href="/pos.html">← Purchase orders</a></p>
+  <div id="msg"></div>
+  <form class="card" id="poForm">
+    <h2 id="title">New purchase order</h2>
+    <div class="grid cols-4">
+      <div class="field"><label for="poNumber">PO number *</label><input id="poNumber" required></div>
+      <div class="field"><label for="supplier">Supplier</label><select id="supplier"></select></div>
+      <div class="field"><label for="category">Category</label><select id="category"></select></div>
+      <div class="field"><label>Status</label><div id="statusPill" style="padding-top:6px"></div></div>
+      <div class="field"><label for="orderDate">Order date</label><input type="date" id="orderDate"></div>
+      <div class="field"><label for="expected">Expected delivery</label><input type="date" id="expected"></div>
+      <div class="field" style="grid-column: span 2"><label for="poNotes">Notes</label><input id="poNotes"></div>
+    </div>
+    <div id="warnings"></div>
+    <h2 style="margin-top:10px">Lines</h2>
+    <div class="table-wrap" style="max-height:none"><table class="data" id="lines">
+      <thead><tr><th>Item code</th><th>Description</th><th class="num">Qty</th><th>UoM</th><th class="num">Unit cost</th><th>Required by</th>
+        <th>For assets</th><th class="num">Received</th><th></th></tr></thead><tbody></tbody>
+    </table></div>
+    <div class="action-row" style="margin-top:10px">
+      <button class="btn secondary editonly" type="button" id="addLine">Add line</button>
+      <span class="grow"></span>
+    </div>
+    <div class="action-row" style="margin-top:14px">
+      <button class="btn editonly" type="submit" id="saveBtn">Save</button>
+      <button class="btn editonly" type="button" id="issueBtn">Save &amp; issue</button>
+      <button class="btn secondary" type="button" id="draftBtn" data-perm="edit">Back to draft</button>
+      <button class="btn secondary" type="button" id="cancelBtn" data-perm="edit">Cancel PO</button>
+      <button class="btn warn" type="button" id="deleteBtn" data-perm="edit">Delete draft</button>
+      <button class="btn secondary" type="button" id="printBtn">Print</button>
+    </div>
+  </form>
+
+  <div class="card" id="receiveCard" style="display:none" data-perm="receive">
+    <h2>Record a delivery</h2>
+    <div class="grid cols-4">
+      <div class="field"><label for="rDate">Received date</label><input type="date" id="rDate"></div>
+      <div class="field"><label for="rDocket">Docket / delivery note</label><input id="rDocket"></div>
+      <div class="field" style="grid-column: span 2"><label for="rNotes">Notes</label><input id="rNotes"></div>
+    </div>
+    <div class="table-wrap"><table class="data" id="rLines">
+      <thead><tr><th>Item code</th><th>Description</th><th class="num">Ordered</th><th class="num">Received so far</th><th class="num">Received now</th></tr></thead><tbody></tbody>
+    </table></div>
+    <div class="action-row" style="margin-top:10px"><button class="btn" type="button" id="receiveBtn">Record delivery</button>
+      <button class="btn secondary" type="button" id="receiveAllBtn">Fill outstanding</button></div>
+  </div>
+
+  <div class="card" id="receiptsCard" style="display:none"><h2>Deliveries</h2>
+    <div class="table-wrap"><table class="data" id="receipts"><thead><tr><th>Date</th><th>Item</th><th class="num">Qty</th><th>Docket</th><th>Received by</th><th>Notes</th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card" id="histCard" style="display:none"><h2>History</h2>
+    <div class="table-wrap"><table class="data" id="hist"><thead><tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
+</main>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  const msg = P.$('#msg');
+  const look = await P.call('lookups');
+  let poId = P.q('id');
+  let po = null;
+  let lines = [];
+
+  const editable = () => P.can('edit') && (!po || ['DRAFT', 'ISSUED'].includes(po.status));
+
+  function fillHeader() {
+    P.$('#supplier').innerHTML = P.options(look.suppliers.filter((s) => s.active || String(s.id) === String(po?.supplier_id)).map((s) => [s.id, s.name]), po?.supplier_id, { blank: '— choose —' });
+    P.$('#category').innerHTML = P.options(look.categories.map((c) => [c.code, c.name]), po?.category_code, { blank: '—' });
+    P.$('#poNumber').value = po?.po_number || '';
+    P.$('#orderDate').value = po?.order_date || '';
+    P.$('#expected').value = po?.expected_date || '';
+    P.$('#poNotes').value = po?.notes || '';
+    P.$('#statusPill').innerHTML = P.status(po?.status || 'DRAFT');
+    P.$('#title').textContent = po ? `Purchase order ${po.po_number}` : 'New purchase order';
+    document.title = `${po ? po.po_number : 'New PO'} — T2W Procurement`;
+    const s = po?.status || 'NEW';
+    P.$('#issueBtn').style.display = ['NEW', 'DRAFT'].includes(s) && P.can('edit') ? '' : 'none';
+    P.$('#draftBtn').style.display = s === 'ISSUED' && P.can('edit') ? '' : 'none';
+    P.$('#cancelBtn').style.display = ['DRAFT', 'ISSUED'].includes(s) && P.can('edit') ? '' : 'none';
+    P.$('#deleteBtn').style.display = s === 'DRAFT' && P.can('edit') ? '' : 'none';
+    document.querySelectorAll('.editonly').forEach((el) => (el.style.display = editable() ? '' : 'none'));
+    P.$('#poForm').querySelectorAll('input, select').forEach((el) => (el.disabled = !editable()));
+  }
+
+  function renderLines() {
+    const ro = !editable();
+    P.$('#lines tbody').innerHTML = lines.map((l, i) => `
+      <tr class="nolink" data-i="${i}">
+        <td><input data-f="item_code" value="${P.esc(l.item_code)}" ${ro ? 'disabled' : ''} style="min-width:140px"></td>
+        <td><input data-f="description" value="${P.esc(l.description)}" ${ro ? 'disabled' : ''} style="min-width:240px"></td>
+        <td><input data-f="qty" type="number" step="any" min="0" value="${l.qty ?? ''}" ${ro ? 'disabled' : ''} style="width:80px;text-align:right"></td>
+        <td><input data-f="uom" value="${P.esc(l.uom || 'ea')}" ${ro ? 'disabled' : ''} style="width:60px"></td>
+        <td><input data-f="unit_cost" type="number" step="any" min="0" value="${l.unit_cost ?? ''}" ${ro ? 'disabled' : ''} style="width:100px;text-align:right"></td>
+        <td><input data-f="required_by" type="date" value="${l.required_by || ''}" ${ro ? 'disabled' : ''}></td>
+        <td class="wrap" style="max-width:300px;font-size:12px">${(l.allocations || []).map((a) =>
+          `<a href="/asset.html?key=${encodeURIComponent(a.record_key)}">${P.esc(a.record_key)}</a>${a.qty !== 1 ? ' ×' + P.num(a.qty, 2) : ''}`).join(', ') || '<span class="muted">stock / unallocated</span>'}</td>
+        <td class="num">${l.id ? P.num(l.qty_received, 2) : ''}</td>
+        <td>${!ro && !(l.qty_received > 0) ? `<button class="btn secondary" type="button" data-del="${i}" title="Remove line">✕</button>` : ''}</td>
+      </tr>`).join('') || '<tr class="nolink"><td colspan="9" class="muted">No lines yet.</td></tr>';
+    P.$('#lines tbody').querySelectorAll('input[data-f]').forEach((inp) => inp.addEventListener('input', () => {
+      const l = lines[inp.closest('tr').dataset.i];
+      l[inp.dataset.f] = inp.type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+    }));
+    P.$('#lines tbody').querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', () => {
+      lines.splice(Number(b.dataset.del), 1);
+      renderLines();
+    }));
+  }
+
+  function renderReceive(receipts, history) {
+    const open = po && ['ISSUED', 'PART_RECEIVED'].includes(po.status) && P.can('receive');
+    P.$('#receiveCard').style.display = open ? '' : 'none';
+    P.$('#rDate').value = P.today();
+    P.$('#rLines tbody').innerHTML = lines.map((l) => `<tr class="nolink"><td>${P.esc(l.item_code)}</td><td class="wrap">${P.esc(l.description)}</td>
+      <td class="num">${P.num(l.qty, 2)}</td><td class="num">${P.num(l.qty_received, 2)}</td>
+      <td class="num"><input type="number" step="any" data-line="${l.id}" data-out="${l.qty - l.qty_received}" style="width:90px;text-align:right"></td></tr>`).join('');
+    P.$('#receiptsCard').style.display = receipts?.length ? '' : 'none';
+    P.$('#receipts tbody').innerHTML = (receipts || []).map((r) => `<tr class="nolink"><td>${P.date(r.received_date)}</td><td>${P.esc(r.item_code)}</td>
+      <td class="num">${P.num(r.qty, 2)}</td><td>${P.esc(r.docket_no || '')}</td><td>${P.esc(r.received_by || '')}</td><td>${P.esc(r.notes || '')}</td></tr>`).join('');
+    P.$('#histCard').style.display = history?.length ? '' : 'none';
+    P.$('#hist tbody').innerHTML = (history || []).map((h) => `<tr class="nolink"><td>${P.dateTime(h.at)}</td><td>${P.esc(h.user_email)}</td>
+      <td>${P.esc(h.action)}</td><td class="wrap muted">${P.esc(JSON.stringify(h.details))}</td></tr>`).join('');
+  }
+
+  async function load() {
+    if (poId) {
+      const d = await P.call('po.get', { id: poId });
+      po = d.po;
+      lines = d.lines;
+      fillHeader();
+      renderLines();
+      renderReceive(d.receipts, d.history);
+      return;
+    }
+    fillHeader();
+    const assets = P.q('assets');
+    if (assets) {
+      const keys = assets.split(',').filter(Boolean);
+      const draft = await P.call('po.draftFromAssets', { recordKeys: keys });
+      lines = draft.lines;
+      if (draft.categoryCode) P.$('#category').value = draft.categoryCode;
+      P.$('#warnings').innerHTML = draft.warnings.map((w) => `<div class="msg err">${P.esc(w)}</div>`).join('');
+      P.$('#poNotes').value = `Raised from order schedule for ${keys.length} asset(s).`;
+    }
+    renderLines();
+  }
+
+  function payload() {
+    return {
+      id: poId || undefined,
+      po_number: P.$('#poNumber').value,
+      supplier_id: P.$('#supplier').value || null,
+      category_code: P.$('#category').value || null,
+      order_date: P.$('#orderDate').value || null,
+      expected_date: P.$('#expected').value || null,
+      notes: P.$('#poNotes').value,
+      lines,
+    };
+  }
+
+  async function save() {
+    const r = await P.call('po.save', payload());
+    if (!poId) history.replaceState(null, '', '/po.html?id=' + r.id);
+    poId = r.id;
+  }
+
+  const act = (fn) => async (ev) => {
+    ev?.preventDefault?.();
+    try { await fn(); await load(); } catch (e) { P.flash(msg, e.message, 'err'); window.scrollTo(0, 0); }
+  };
+
+  P.$('#poForm').addEventListener('submit', act(async () => { await save(); P.flash(msg, 'Purchase order saved.'); }));
+  P.$('#issueBtn').addEventListener('click', act(async () => {
+    if (!confirm('Issue this PO? Assets on it will count as ordered.')) return;
+    await save();
+    await P.call('po.setStatus', { id: poId, status: 'ISSUED' });
+    P.flash(msg, 'Purchase order issued.');
+  }));
+  P.$('#draftBtn').addEventListener('click', act(async () => { await P.call('po.setStatus', { id: poId, status: 'DRAFT' }); }));
+  P.$('#cancelBtn').addEventListener('click', act(async () => {
+    if (!confirm('Cancel this purchase order? Its assets go back on the order schedule.')) return;
+    if (!poId) { location.href = '/pos.html'; return; }
+    await P.call('po.setStatus', { id: poId, status: 'CANCELLED' });
+  }));
+  P.$('#deleteBtn').addEventListener('click', async () => {
+    if (!confirm('Delete this draft PO?')) return;
+    try { await P.call('po.delete', { id: poId }); location.href = '/pos.html'; } catch (e) { P.flash(msg, e.message, 'err'); }
+  });
+  P.$('#addLine').addEventListener('click', () => { lines.push({ item_code: '', description: '', qty: 1, uom: 'ea', allocations: [] }); renderLines(); });
+  P.$('#printBtn').addEventListener('click', () => window.print());
+  P.$('#receiveAllBtn').addEventListener('click', () => P.$('#rLines').querySelectorAll('input[data-line]').forEach((i) => (i.value = Math.max(0, Number(i.dataset.out)) || '')));
+  P.$('#receiveBtn').addEventListener('click', act(async () => {
+    const rl = [...P.$('#rLines').querySelectorAll('input[data-line]')].filter((i) => i.value !== '' && Number(i.value) !== 0)
+      .map((i) => ({ po_line_id: i.dataset.line, qty: Number(i.value) }));
+    const r = await P.call('po.receive', { id: poId, received_date: P.$('#rDate').value, docket_no: P.$('#rDocket').value, notes: P.$('#rNotes').value, lines: rl });
+    P.$('#rDocket').value = ''; P.$('#rNotes').value = '';
+    P.flash(msg, `Delivery recorded — PO is now ${P.STATUS[r.status]}.`);
+  }));
+  await load().catch((e) => P.flash(msg, e.message, 'err'));
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

@@ -1,0 +1,23 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  // New, separate Worker. It does not share a name, URL, cookies, secrets or
+  // bindings with the works-tracking Worker (db-t2w).
+  "name": "t2w-procurement",
+  "main": "src/worker.js",
+  "compatibility_date": "2026-09-07",
+  "workers_dev": true,
+  "assets": {
+    "directory": "./public",
+    "binding": "ASSETS",
+    "html_handling": "auto-trailing-slash",
+    "not_found_handling": "404-page",
+    "run_worker_first": ["/api/*"]
+  },
+  "observability": { "enabled": true },
+  "vars": {
+    // Public values only - the publishable key is safe to ship to browsers.
+    "SUPABASE_URL": "https://arqllvamfmjcbuijqqrg.supabase.co",
+    "SUPABASE_PUBLISHABLE_KEY": "sb_publishable_yjyMuCPwmM28IzG6JwNblw_eWbFuDZE",
+    "PROCUREMENT_FUNCTION": "t2w-procurement-api"
+  }
+}

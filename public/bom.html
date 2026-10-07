@@ -1,0 +1,157 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>BOM templates — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <div id="msg"></div>
+  <div class="card" id="editor" style="display:none">
+    <h2 id="eTitle">BOM template</h2>
+    <p class="small-copy">One template per assembly. Every asset in the register with this assembly key needs exactly these items.
+      Saving any change puts the template back to <b>Draft</b> until it is approved again.</p>
+    <div class="grid cols-4">
+      <div class="field" style="grid-column: span 2"><label for="tKey">Assembly key (matches the register)</label><input id="tKey"></div>
+      <div class="field"><label for="tCat">Category</label><select id="tCat"></select></div>
+      <div class="field"><label>Status</label><div id="tStatus" style="padding-top:6px"></div></div>
+      <div class="field" style="grid-column: span 2"><label for="tTitle">Title</label><input id="tTitle"></div>
+      <div class="field" style="grid-column: span 2"><label for="tDrawing">Standard drawing ref</label><input id="tDrawing"></div>
+      <div class="field" style="grid-column: span 4"><label for="tNotes">Notes</label><textarea id="tNotes" rows="2"></textarea></div>
+    </div>
+    <div class="table-wrap" style="max-height:none"><table class="data" id="tLines">
+      <thead><tr><th>#</th><th>Item code</th><th>Description</th><th class="num">Qty / assembly</th><th>UoM</th><th class="num">Lead time (days, optional)</th><th></th></tr></thead><tbody></tbody>
+    </table></div>
+    <div class="action-row" style="margin-top:10px" data-perm="edit">
+      <button class="btn secondary" type="button" id="addLine">Add line</button>
+      <button class="btn" type="button" id="saveTpl">Save</button>
+      <button class="btn" type="button" id="approveTpl">Approve</button>
+      <button class="btn secondary" type="button" id="unapproveTpl">Back to draft</button>
+      <a href="/bom.html" class="muted" style="align-self:center;margin-left:8px">Close</a>
+    </div>
+    <h2 style="margin-top:16px">Assets using this template</h2>
+    <div class="table-wrap"><table class="data" id="tAssets"><thead><tr><th>Asset</th><th>Section</th><th class="num">Chainage</th>
+      <th>Need on site</th><th>Order by</th><th>Status</th><th>BOM confirmed</th></tr></thead><tbody></tbody></table></div>
+  </div>
+
+  <div class="card">
+    <h2>BOM templates</h2>
+    <p class="small-copy">Starter templates were created for each assembly found in the register, holding only what the register
+      itself says (branch tee size, assembly group, bend size/angle). Expand each into its full component list from the standard
+      drawing — valves, pits, lids, fittings, gaskets, bolt sets — then approve it.</p>
+    <div class="toolbar">
+      <div class="field"><label for="fCat">Category</label><select id="fCat"></select></div>
+      <div class="field"><label for="fStatus">Status</label><select id="fStatus"><option value="">All</option><option value="DRAFT">Draft</option><option value="APPROVED">Approved</option></select></div>
+      <div class="field grow"><label for="fSearch">Search</label><input id="fSearch"></div>
+      <div class="field" data-perm="edit"><label>&nbsp;</label><button class="btn secondary" type="button" id="newTpl">New template</button></div>
+    </div>
+    <div class="table-wrap"><table class="data" id="list">
+      <thead><tr><th>Assembly key</th><th>Category</th><th>Status</th><th class="num">Lines</th><th class="num">Assets</th><th>First needed</th><th>Approved by</th></tr></thead>
+      <tbody><tr class="nolink"><td colspan="7" class="loading">Loading…</td></tr></tbody>
+    </table></div>
+  </div>
+</main>
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  const msg = P.$('#msg');
+  const look = await P.call('lookups');
+  const catOpts = look.categories.map((c) => [c.code, c.name]);
+  P.$('#fCat').innerHTML = P.options(catOpts, '', { blank: 'All' });
+  let rows = [];
+  let tid = P.q('id');
+  let lines = [];
+
+  async function loadList() {
+    rows = (await P.call('templates.list')).rows;
+    renderList();
+  }
+  function renderList() {
+    const s = P.$('#fSearch').value.trim().toLowerCase();
+    const list = rows.filter((r) => (!P.$('#fCat').value || r.category_code === P.$('#fCat').value)
+      && (!P.$('#fStatus').value || r.status === P.$('#fStatus').value)
+      && (!s || `${r.assembly_key} ${r.title}`.toLowerCase().includes(s)));
+    P.$('#list tbody').innerHTML = list.map((r) => `<tr onclick="location.href='/bom.html?id=${r.id}'">
+      <td><b>${P.esc(r.assembly_key)}</b>${r.title !== r.assembly_key ? `<div class="muted">${P.esc(r.title)}</div>` : ''}</td>
+      <td>${P.esc(r.category_code || '')}</td><td>${P.status(r.status)}</td><td class="num">${r.line_count}</td><td class="num">${r.asset_count}</td>
+      <td>${P.date(r.first_need)}</td><td>${P.esc(r.approved_by || '')}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="7" class="muted">No templates.</td></tr>';
+  }
+
+  function renderLines() {
+    const ro = !P.can('edit');
+    P.$('#tLines tbody').innerHTML = lines.map((l, i) => `<tr class="nolink" data-i="${i}"><td>${i + 1}</td>
+      <td><input data-f="item_code" value="${P.esc(l.item_code)}" ${ro ? 'disabled' : ''} style="min-width:150px"></td>
+      <td><input data-f="description" value="${P.esc(l.description)}" ${ro ? 'disabled' : ''} style="min-width:300px"></td>
+      <td><input data-f="qty" type="number" step="any" min="0" value="${l.qty ?? 1}" ${ro ? 'disabled' : ''} style="width:80px;text-align:right"></td>
+      <td><input data-f="uom" value="${P.esc(l.uom || 'ea')}" ${ro ? 'disabled' : ''} style="width:60px"></td>
+      <td><input data-f="lead_time_days" type="number" min="0" step="1" value="${l.lead_time_days ?? ''}" ${ro ? 'disabled' : ''} style="width:90px;text-align:right"></td>
+      <td>${ro ? '' : `<button class="btn secondary" type="button" data-del="${i}">✕</button>`}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="7" class="muted">No lines.</td></tr>';
+    P.$('#tLines tbody').querySelectorAll('input[data-f]').forEach((inp) => inp.addEventListener('input', () => {
+      lines[inp.closest('tr').dataset.i][inp.dataset.f] = inp.type === 'number' ? (inp.value === '' ? null : Number(inp.value)) : inp.value;
+    }));
+    P.$('#tLines tbody').querySelectorAll('button[data-del]').forEach((b) => b.addEventListener('click', () => { lines.splice(Number(b.dataset.del), 1); renderLines(); }));
+  }
+
+  async function loadTemplate() {
+    P.$('#editor').style.display = '';
+    P.$('#tCat').innerHTML = P.options(catOpts, '', { blank: '—' });
+    if (!tid) {
+      P.$('#eTitle').textContent = 'New BOM template';
+      P.$('#tStatus').innerHTML = P.status('DRAFT');
+      ['#approveTpl', '#unapproveTpl'].forEach((s) => (P.$(s).style.display = 'none'));
+      lines = [];
+      renderLines();
+      return;
+    }
+    const d = await P.call('template.get', { id: tid });
+    const t = d.template;
+    P.$('#eTitle').textContent = `BOM template — ${t.assembly_key}`;
+    P.$('#tKey').value = t.assembly_key;
+    P.$('#tTitle').value = t.title;
+    P.$('#tCat').value = t.category_code || '';
+    P.$('#tDrawing').value = t.drawing_ref || '';
+    P.$('#tNotes').value = t.notes || '';
+    P.$('#tStatus').innerHTML = P.status(t.status) + (t.approved_by ? ` <span class="muted">${P.esc(t.approved_by)} · ${P.dateTime(t.approved_at)}</span>` : '');
+    P.$('#approveTpl').style.display = t.status === 'DRAFT' ? '' : 'none';
+    P.$('#unapproveTpl').style.display = t.status === 'APPROVED' ? '' : 'none';
+    lines = d.lines;
+    renderLines();
+    P.$('#tAssets tbody').innerHTML = d.assets.map((a) => `<tr onclick="location.href='/asset.html?key=${encodeURIComponent(a.record_key)}'">
+      <td><b>${P.esc(a.record_key)}</b></td><td>${P.esc(a.section)}</td><td class="num">${P.num(a.chainage)}</td><td>${P.date(a.need_date)}</td>
+      <td>${P.date(a.order_by_date)}</td><td>${P.status(a.status)}</td><td>${a.bom_confirmed ? '<span class="check-ok">✓</span>' : ''}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="7" class="muted">No register assets match this assembly key — check it matches exactly.</td></tr>';
+    P.$('#editor').scrollIntoView();
+  }
+
+  const act = (fn) => async () => {
+    try { await fn(); await Promise.all([loadTemplate(), loadList()]); } catch (e) { P.flash(msg, e.message, 'err'); window.scrollTo(0, 0); }
+  };
+  P.$('#addLine').addEventListener('click', () => { lines.push({ item_code: '', description: '', qty: 1, uom: 'ea' }); renderLines(); });
+  P.$('#saveTpl').addEventListener('click', act(async () => {
+    const r = await P.call('template.save', {
+      id: tid || undefined, assemblyKey: P.$('#tKey').value, title: P.$('#tTitle').value || P.$('#tKey').value,
+      categoryCode: P.$('#tCat').value || null, drawingRef: P.$('#tDrawing').value, notes: P.$('#tNotes').value, lines,
+    });
+    if (!tid) { tid = r.id; history.replaceState(null, '', '/bom.html?id=' + r.id); }
+    P.flash(msg, 'Template saved (draft — approve when checked).');
+  }));
+  P.$('#approveTpl').addEventListener('click', act(async () => {
+    if (!confirm('Approve this BOM? Assets using it can then be ordered and confirmed against it.')) return;
+    await P.call('template.approve', { id: tid, approve: true });
+    P.flash(msg, 'Template approved.');
+  }));
+  P.$('#unapproveTpl').addEventListener('click', act(async () => { await P.call('template.approve', { id: tid, approve: false }); }));
+  P.$('#newTpl').addEventListener('click', () => { tid = null; history.replaceState(null, '', '/bom.html'); loadTemplate(); });
+  ['#fCat', '#fStatus'].forEach((s) => P.$(s).addEventListener('change', renderList));
+  P.$('#fSearch').addEventListener('input', renderList);
+  await loadList();
+  if (tid) await loadTemplate().catch((e) => P.flash(msg, e.message, 'err'));
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

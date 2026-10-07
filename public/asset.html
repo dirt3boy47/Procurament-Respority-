@@ -1,0 +1,150 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Asset — T2W Procurement</title>
+<link rel="stylesheet" href="/style.css">
+</head>
+<body>
+<main>
+  <p><a href="/schedule.html">← Order schedule</a></p>
+  <div id="msg"></div>
+  <div class="grid cols-2">
+    <div class="card"><h2 id="title">Asset</h2><dl class="kv" id="info"></dl></div>
+    <div class="card"><h2>Procurement plan</h2><dl class="kv" id="plan"></dl>
+      <form id="planForm" data-perm="edit" style="margin-top:14px">
+        <div class="grid cols-2">
+          <div class="field"><label for="ovr">Need-date override</label><input type="date" id="ovr"></div>
+          <div class="field"><label style="margin-top:22px;display:flex;gap:6px;align-items:center"><input type="checkbox" id="hold" style="width:auto"> On hold (don't order)</label></div>
+        </div>
+        <div class="field"><label for="notes">Notes</label><textarea id="notes" rows="2"></textarea></div>
+        <button class="btn secondary" type="submit">Save plan</button>
+      </form>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>BOM check — required vs ordered</h2>
+    <div id="bomNote" class="small-copy" style="margin-bottom:10px"></div>
+    <div class="table-wrap"><table class="data" id="bom">
+      <thead><tr><th>#</th><th>Item code</th><th>Description</th><th class="num">Required</th><th class="num">On draft PO</th>
+        <th class="num">Ordered</th><th class="num">Received</th><th class="num">Lead</th><th>POs</th><th>Check</th></tr></thead><tbody></tbody>
+    </table></div>
+    <div class="action-row" style="margin-top:12px" data-perm="edit">
+      <button class="btn" id="confirmBtn" type="button">Confirm the correct BOM is ordered</button>
+      <button class="btn secondary" id="unconfirmBtn" type="button">Withdraw confirmation</button>
+      <button class="btn secondary" id="poBtn" type="button">Create PO for outstanding items</button>
+      <a class="btn secondary" id="tplLink">Edit BOM template</a>
+    </div>
+  </div>
+
+  <div class="card">
+    <h2>Programme activities linked to this asset</h2>
+    <div class="table-wrap"><table class="data" id="acts">
+      <thead><tr><th>Activity</th><th>Name</th><th>Work package</th><th>Planned start</th><th>Planned finish</th><th class="num">% complete</th></tr></thead><tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="card">
+    <h2>Purchase order allocations</h2>
+    <div class="table-wrap"><table class="data" id="allocs">
+      <thead><tr><th>PO</th><th>Supplier</th><th>Status</th><th>Item</th><th class="num">Qty for this asset</th><th class="num">Line received</th><th>Expected</th></tr></thead><tbody></tbody>
+    </table></div>
+  </div>
+
+  <div class="card"><h2>History</h2><div class="table-wrap"><table class="data" id="hist">
+    <thead><tr><th>When</th><th>Who</th><th>What</th><th>Detail</th></tr></thead><tbody></tbody></table></div></div>
+</main>
+
+<script src="/app.js"></script>
+<script>
+(async () => {
+  await P.mount();
+  const key = P.q('key');
+  const msg = P.$('#msg');
+  if (!key) { P.flash(msg, 'No asset selected.', 'err'); return; }
+
+  async function load() {
+    const d = await P.call('asset.get', { recordKey: key });
+    const a = d.asset;
+    document.title = `${a.record_key} — T2W Procurement`;
+    P.$('#title').innerHTML = `${P.esc(a.record_key)} ${P.status(a.status)}`;
+    const row = (k, v) => (v === null || v === undefined || v === '' ? '' : `<dt>${k}</dt><dd>${v}</dd>`);
+    P.$('#info').innerHTML = [
+      row('Section', P.esc(a.section)), row('Register / type', P.esc(`${a.register} / ${a.asset_type}`)),
+      row('Chainage', P.num(a.chainage, 1) + ' m'), row('Assembly', `<b>${P.esc(a.assembly_key)}</b>`),
+      row('Arrangement', P.esc(a.valve_arrangement_type)), row('Assembly group', P.esc(a.valve_assembly_group)),
+      row('Tee size', P.esc(a.tee_size)), row('Material / DN', a.fitting_material ? P.esc(`${a.fitting_material} DN${a.fitting_dn ?? ''}`) : ''),
+      row('Bend', P.esc([a.bend_angle, a.bend_class].filter(Boolean).join(' · '))), row('Side', P.esc(a.side)),
+      row('Drawing', P.esc(a.drawing)), row('Installed', P.esc(a.installed || 'No')),
+    ].join('');
+    P.$('#plan').innerHTML = [
+      row('Category', P.esc(`${a.category_name} (${a.category_code})`)),
+      row('Programme need date', `${P.date(a.programme_need_date) || '<span class="muted">not linked to the programme</span>'} <span class="muted">${P.esc(a.need_activity_id || '')}</span>`),
+      row('Need-date override', P.date(a.need_date_override)),
+      row('Need on site', `<b>${P.date(a.need_date)}</b> <span class="muted">${P.relDays(a.need_date)}</span>`),
+      row('Lead time + buffer', `${a.effective_lead_days} + ${a.buffer_days} days`),
+      row('Order by', `<b>${P.date(a.order_by_date)}</b> <span class="muted">${P.relDays(a.order_by_date)}</span>`),
+      row('BOM confirmation', a.bom_confirmed ? `<span class="check-ok">✓ ${P.esc(a.bom_confirmed_by)} · ${P.dateTime(a.bom_confirmed_at)}</span>`
+        : a.bom_confirmation_stale ? '<span class="check-bad">Confirmed earlier, but the BOM or orders have changed since — re-check.</span>' : '<span class="muted">Not confirmed</span>'),
+      row('Notes', P.esc(a.plan_notes)),
+    ].join('');
+    P.$('#ovr').value = a.need_date_override || '';
+    P.$('#hold').checked = a.on_hold;
+    P.$('#notes').value = a.plan_notes || '';
+
+    const tpl = a.template_id;
+    P.$('#tplLink').href = tpl ? `/bom.html?id=${tpl}` : '/bom.html';
+    P.$('#bomNote').innerHTML = !tpl ? 'No BOM template exists for this assembly yet — create one on the BOM templates page.'
+      : a.template_status !== 'APPROVED' ? `<span class="check-bad">The BOM template for <b>${P.esc(a.assembly_key)}</b> is still a draft.</span> Check it against the standard drawing and approve it before ordering.`
+      : `Template <b>${P.esc(a.assembly_key)}</b> is approved. Each line below must be fully covered by issued POs before you can confirm.`;
+    P.$('#bom tbody').innerHTML = d.bom.map((l) => {
+      const ok = l.ordered_qty >= l.required_qty;
+      const recv = l.received_qty >= l.required_qty - 0.0001;
+      return `<tr class="nolink"><td>${l.line_no}</td><td><b>${P.esc(l.item_code)}</b></td><td class="wrap">${P.esc(l.description)}</td>
+        <td class="num">${P.num(l.required_qty, 2)} ${P.esc(l.uom)}</td><td class="num">${P.num(l.drafted_qty, 2)}</td>
+        <td class="num">${P.num(l.ordered_qty, 2)}</td><td class="num">${P.num(l.received_qty, 2)}</td><td class="num">${l.lead_time_days}d</td>
+        <td>${P.esc(l.po_numbers || '')}</td>
+        <td>${recv ? '<span class="check-ok">✓ received</span>' : ok ? '<span class="check-ok">✓ ordered</span>' : l.drafted_qty > 0 ? '<span class="pill s-PART_ORDERED">on draft</span>' : '<span class="check-bad">✗ not ordered</span>'}</td></tr>`;
+    }).join('') || '<tr class="nolink"><td colspan="10" class="muted">No BOM lines.</td></tr>';
+    const allOrdered = d.bom.length > 0 && d.bom.every((l) => l.ordered_qty >= l.required_qty);
+    P.$('#confirmBtn').disabled = !(allOrdered && a.template_status === 'APPROVED') || a.bom_confirmed;
+    P.$('#unconfirmBtn').style.display = a.bom_confirmed_at ? '' : 'none';
+    P.$('#poBtn').disabled = !d.bom.some((l) => l.ordered_qty + l.drafted_qty < l.required_qty);
+
+    P.$('#acts tbody').innerHTML = d.activities.map((x) => `<tr class="nolink"><td>${P.esc(x.activity_id)}</td><td class="wrap">${P.esc(x.activity_name)}</td>
+      <td>${P.esc(x.work_package)}</td><td>${P.date(x.planned_start)}</td><td>${P.date(x.planned_finish)}</td>
+      <td class="num">${x.physical_percent_complete == null ? '' : P.num(x.physical_percent_complete) + '%'}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="6" class="muted">Not linked to any programme activity — set a need-date override.</td></tr>';
+    P.$('#allocs tbody').innerHTML = d.allocations.map((x) => `<tr onclick="location.href='/po.html?id=${x.po_id}'">
+      <td><b>${P.esc(x.po_number)}</b></td><td>${P.esc(x.supplier)}</td><td>${P.status(x.po_status)}</td><td>${P.esc(x.item_code)}</td>
+      <td class="num">${P.num(x.qty, 2)}</td><td class="num">${P.num(x.qty_received, 2)} / ${P.num(x.line_qty, 2)}</td><td>${P.date(x.expected_date)}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="7" class="muted">Not on any purchase order yet.</td></tr>';
+    P.$('#hist tbody').innerHTML = d.history.map((h) => `<tr class="nolink"><td>${P.dateTime(h.at)}</td><td>${P.esc(h.user_email)}</td>
+      <td>${P.esc(h.action)}</td><td class="wrap muted">${P.esc(JSON.stringify(h.details))}</td></tr>`).join('')
+      || '<tr class="nolink"><td colspan="4" class="muted">No changes recorded.</td></tr>';
+  }
+
+  const act = (fn) => async (ev) => {
+    ev?.preventDefault?.();
+    try { await fn(); await load(); } catch (e) { P.flash(msg, e.message, 'err'); window.scrollTo(0, 0); }
+  };
+  P.$('#planForm').addEventListener('submit', act(async () => {
+    await P.call('asset.plan.save', { recordKey: key, needDateOverride: P.$('#ovr').value || null, onHold: P.$('#hold').checked, notes: P.$('#notes').value });
+    P.flash(msg, 'Plan saved.');
+  }));
+  P.$('#confirmBtn').addEventListener('click', act(async () => {
+    await P.call('asset.confirmBom', { recordKey: key });
+    P.flash(msg, 'BOM order confirmed.');
+  }));
+  P.$('#unconfirmBtn').addEventListener('click', act(async () => {
+    if (!confirm('Withdraw the BOM confirmation for this asset?')) return;
+    await P.call('asset.unconfirmBom', { recordKey: key });
+  }));
+  P.$('#poBtn').addEventListener('click', () => { location.href = '/po.html?assets=' + encodeURIComponent(key); });
+  await load().catch((e) => P.flash(msg, e.message, 'err'));
+})().catch((e) => console.error(e));
+</script>
+</body>
+</html>

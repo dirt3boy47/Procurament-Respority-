@@ -1,0 +1,16 @@
+{
+  "name": "t2w-procurement",
+  "version": "0.1.0",
+  "private": true,
+  "description": "T2W Pipeline procurement planner — schedules orders for valves, pits and fittings against the T2W programme.",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node --test test/*.test.mjs"
+  },
+  "devDependencies": {
+    "@electric-sql/pglite": "^0.3.0",
+    "wrangler": "^4.0.0"
+  }
+}
