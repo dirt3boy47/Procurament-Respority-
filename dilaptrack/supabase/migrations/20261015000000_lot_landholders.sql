@@ -45,10 +45,6 @@ create index lot_landholders_landholder_idx on public.lot_landholders (landholde
 
 create trigger lot_landholders_updated before update on public.lot_landholders
   for each row execute function public.set_updated();
-create trigger lot_landholders_guard before insert or update on public.lot_landholders
-  for each row execute function public.guard_lot_children();
-create trigger lot_landholders_guard_delete before delete on public.lot_landholders
-  for each row execute function public.guard_lot_children_delete();
 create trigger lot_landholders_audit after insert or update or delete on public.lot_landholders
   for each row execute function public.audit_change();
 
@@ -95,6 +91,13 @@ select l.id, l.landholder_id, 'owner', l.landholder_signoff_date,
 from public.lots l
 join public.landholders h on h.id = l.landholder_id
 on conflict (lot_id, landholder_id) do nothing;
+
+-- Closed lots lock their landholders too (added after the copy above, which
+-- includes closed lots).
+create trigger lot_landholders_guard before insert or update on public.lot_landholders
+  for each row execute function public.guard_lot_children();
+create trigger lot_landholders_guard_delete before delete on public.lot_landholders
+  for each row execute function public.guard_lot_children_delete();
 
 -- The old column would block deleting a landholder that is no longer linked.
 update public.lots set landholder_id = null where landholder_id is not null;

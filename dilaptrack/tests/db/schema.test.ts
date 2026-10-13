@@ -379,7 +379,10 @@ describe("upgrading an existing database", () => {
           insert into public.landholders (name) values ('Ridge Farming Co'), ('M Patel');
           insert into public.lots (lot_number, landholder_id, landholder_signoff_date, landholder_signoff_name)
             select 'B1', id, '2026-10-01', 'Ridge Farming Co (by J Ridge)' from public.landholders where name = 'Ridge Farming Co';
-          insert into public.lots (lot_number, landholder_id) select 'B2', id from public.landholders where name = 'M Patel';`);
+          insert into public.lots (lot_number, landholder_id) select 'B2', id from public.landholders where name = 'M Patel';
+          -- B1 is already closed: its records are locked, but the upgrade must still copy them.
+          update public.surveys set status = 'complete', survey_date = '2026-09-01', surveyor = 'A N' where lot_id = (select id from public.lots where lot_number = 'B1');
+          update public.lots set status = 'closed' where lot_number = 'B1';`);
       },
     });
     const { rows } = await old.query<{ lot_number: string; name: string; role: string; acceptance_date: string | null; acceptance_name: string | null }>(
@@ -393,6 +396,8 @@ describe("upgrading an existing database", () => {
     ]);
     const { rows: legacy } = await old.query<{ n: number }>("select count(*)::int n from public.lots where landholder_id is not null");
     expect(legacy[0].n).toBe(0);
+    const { rows: b1 } = await old.query<{ status: string }>("select status from public.lots where lot_number = 'B1'");
+    expect(b1[0].status).toBe("closed");
     await old.close();
   }, 60_000);
 });
