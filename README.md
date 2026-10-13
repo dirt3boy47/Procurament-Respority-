@@ -1,5 +1,8 @@
 # T2W Pipeline — Procurement planner
 
+> **Also in this repository:** [`dilaptrack/`](dilaptrack/) — DilapTrack, a separate Next.js + Supabase app for
+> property dilapidation surveys, defects, reinstatement and close-out. See its own README.
+
 Schedules orders for valves, pits and fittings against the T2W programme, tracks
 purchase orders and deliveries, and checks that the right bill of materials (BOM)
 was ordered for every asset before it's needed on site.

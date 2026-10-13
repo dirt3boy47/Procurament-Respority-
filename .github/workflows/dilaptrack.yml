@@ -1,0 +1,33 @@
+name: DilapTrack
+
+on:
+  push:
+    paths: ["dilaptrack/**", ".github/workflows/dilaptrack.yml"]
+  pull_request:
+    paths: ["dilaptrack/**", ".github/workflows/dilaptrack.yml"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    working-directory: dilaptrack
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    env:
+      # Placeholder values so the build can run; no Supabase project is contacted.
+      NEXT_PUBLIC_SUPABASE_URL: https://example.supabase.co
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: sb_publishable_ci
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dilaptrack/package-lock.json
+      - run: npm ci
+      - run: npm run lint
+      - run: npm run typecheck
+      # Unit tests plus the database schema and Row Level Security tests (PGlite, in-process)
+      - run: npm test
+      - run: npm run build
