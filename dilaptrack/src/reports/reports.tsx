@@ -1,4 +1,4 @@
-// The four PDF reports. Each takes plain data and returns a react-pdf document.
+// The PDF reports. Each takes plain data and returns a react-pdf document.
 import { Text, View } from "@react-pdf/renderer";
 import type { ChecklistItem } from "@/lib/closeout";
 import { labelFor, LOT_STATUSES, SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
@@ -44,22 +44,18 @@ function Acceptance({ lot }: { lot: LotOverview }) {
 
 // ------------------------------------------------------------------ Lot report
 
-export function LotReport({
-  meta,
-  lot,
-  checklist,
-  surveys,
-  photos,
-}: {
-  meta: Meta;
+type LotSectionProps = {
   lot: LotOverview;
   checklist: ChecklistItem[];
   surveys: (Survey & { fileCount: number })[];
   photos: { title: string; items: PdfPhoto[] }[];
-}) {
+};
+
+/** Everything about one lot: shared by the Lot Report and the landholder pack. */
+function LotSections({ lot, checklist, surveys, photos, heading }: LotSectionProps & { heading?: string }) {
   return (
-    <Report title={`Lot Report - Lot ${lot.lot_number}`} subtitle={lot.address ?? undefined} {...meta}>
-      <Section title="Lot details">
+    <>
+      <Section title={heading ?? "Lot details"}>
         <KeyValues items={lotDetails(lot)} />
         <Notes text={lot.notes} />
       </Section>
@@ -108,11 +104,19 @@ export function LotReport({
 
       {photos
         .filter((g) => g.items.length)
-        .map((g, i) => (
-          <Section key={g.title} title={g.title} breakBefore={i === 0}>
+        .map((g) => (
+          <Section key={g.title} title={g.title}>
             <Photos photos={g.items} perRow={3} />
           </Section>
         ))}
+    </>
+  );
+}
+
+export function LotReport({ meta, ...lot }: LotSectionProps & { meta: Meta }) {
+  return (
+    <Report title={`Lot Report - Lot ${lot.lot.lot_number}`} subtitle={lot.lot.address ?? undefined} {...meta}>
+      <LotSections {...lot} />
     </Report>
   );
 }
@@ -185,12 +189,18 @@ export function SurveyReport({
 
 // ------------------------------------------------------------------ Landholder report
 
+/** A PDF uploaded to one of the landholder's lots, appended to the pack. */
+export type PackDocument = { src: string; lotNumber: string; folder: string; fileName: string; caption: string | null };
+
 export function LandholderReport({
   meta,
   groups,
+  pack,
 }: {
   meta: Meta;
   groups: { landholder: Landholder; lots: LotOverview[] }[];
+  /** For a single landholder: every lot in full, plus the uploaded PDFs appended after this document. */
+  pack?: { lots: LotSectionProps[]; documents: PackDocument[] };
 }) {
   const lots = groups.flatMap((g) => g.lots);
   return (
@@ -238,6 +248,36 @@ export function LandholderReport({
           </View>
         </Section>
       ))}
+
+      {pack?.lots.map((l) => (
+        <View key={l.lot.id} break>
+          <LotSections {...l} heading={`Lot ${l.lot.lot_number}${l.lot.address ? ` - ${l.lot.address}` : ""}`} />
+        </View>
+      ))}
+
+      {pack && pack.documents.length > 0 && (
+        <View break>
+          <Section title="Appendix - attached documents">
+            <Text style={[styles.muted, { marginBottom: 6 }]}>
+              The following documents uploaded to these lots are attached after this page, in this order.
+            </Text>
+            <Table
+              columns={[
+                { header: "Ref", width: 8 },
+                { header: "Lot", width: 14 },
+                { header: "Folder", width: 20 },
+                { header: "Document", width: 58 },
+              ]}
+              rows={pack.documents.map((d, i) => [
+                `A${i + 1}`,
+                d.lotNumber,
+                d.folder,
+                d.caption ? `${d.caption} (${d.fileName})` : d.fileName,
+              ])}
+            />
+          </Section>
+        </View>
+      )}
     </Report>
   );
 }

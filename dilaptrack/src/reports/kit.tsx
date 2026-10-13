@@ -78,7 +78,7 @@ export function Report({
 export function Section({ title, children, breakBefore }: { title: string; children: ReactNode; breakBefore?: boolean }) {
   return (
     <View style={styles.section} break={breakBefore}>
-      <Text style={styles.sectionTitle} minPresenceAhead={40}>
+      <Text style={styles.sectionTitle} minPresenceAhead={140}>
         {title}
       </Text>
       {children}

@@ -43,7 +43,7 @@ export default async function ReportsPage() {
           type="landholder"
           icon={<Contact />}
           title="Landholder Report"
-          description="Each landholder's contact details with the survey, acceptance and close-out status of their lots. For one landholder or all of them."
+          description="For one landholder: a single combined pack with their details, every lot's full report and survey photos, and all PDFs uploaded to their lots (survey reports, signed forms). For all landholders: a contact and status summary."
           lots={landholders}
           lotLabel="Landholder"
           lotParam="landholder"
