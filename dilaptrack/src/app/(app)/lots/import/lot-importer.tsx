@@ -183,7 +183,9 @@ export function LotImporter({ existingLotNumbers }: { existingLotNumbers: string
               The first row should hold column headings. Recognised columns:{" "}
               {IMPORT_FIELDS.map((f) => f.label).join(", ")}. Only Lot Number is required. Lot numbers already in
               the register are skipped, never overwritten. Landholders are matched to the landholder register by name;
-              new names are added to it (with the contact, if given).
+              new names are added to it (with the contact, if given). For a lot with several landholders, separate
+              the names with a semicolon, e.g. &quot;TRC; P &amp; R Walsh; Emma Clarke&quot;. Roles, properties and damage
+              can then be set on each lot&apos;s Landholders card.
             </p>
           </div>
         </CardContent>

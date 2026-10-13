@@ -1,17 +1,19 @@
-import Link from "next/link";
 import type { ReactNode } from "react";
+import Link from "next/link";
 import { notFound } from "next/navigation";
-import { ChevronLeft, Trash2 } from "lucide-react";
+import { ChevronLeft, FileText, Trash2 } from "lucide-react";
 import { deleteLandholder } from "@/actions/landholders";
+import { IssuedReportDownload } from "@/components/issued-report-download";
 import { EditLandholderButton } from "@/components/landholders/landholder-dialogs";
 import { ProgressDots } from "@/components/lots/progress";
-import { StatusBadge } from "@/components/ui/badge";
+import { ReportButton } from "@/components/report-button";
+import { Badge, StatusBadge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { requireSession } from "@/lib/auth";
-import { LOT_STATUSES } from "@/lib/constants";
+import { LANDHOLDER_ROLES, LOT_STATUSES } from "@/lib/constants";
 import { compareLotNumbers, listLots } from "@/lib/data";
-import { formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 
 async function getLandholder(id: string) {
@@ -29,9 +31,19 @@ export async function generateMetadata({ params }: PageProps<"/landholders/[id]"
 export default async function LandholderPage({ params }: PageProps<"/landholders/[id]">) {
   const { can } = await requireSession();
   const landholder = await getLandholder((await params).id);
-  const lots = (await listLots())
-    .filter((l) => l.landholder_id === landholder.id)
-    .sort((a, b) => compareLotNumbers(a.lot_number, b.lot_number));
+  const supabase = await createClient();
+  const [allLots, { data: links }, { data: reports }] = await Promise.all([
+    listLots(),
+    supabase.from("lot_landholders").select("*").eq("landholder_id", landholder.id),
+    supabase.from("issued_reports").select("*").eq("landholder_id", landholder.id).order("created_at", { ascending: false }),
+  ]);
+  const lotById = new Map(allLots.map((l) => [l.id, l]));
+  const rows = (links ?? [])
+    .flatMap((link) => {
+      const lot = lotById.get(link.lot_id);
+      return lot ? [{ link, lot }] : [];
+    })
+    .sort((a, b) => compareLotNumbers(a.lot.lot_number, b.lot.lot_number));
 
   const details: [string, ReactNode][] = [
     [
@@ -74,49 +86,86 @@ export default async function LandholderPage({ params }: PageProps<"/landholders
                 <dd className="mt-0.5 text-sm whitespace-pre-wrap">{landholder.notes || "—"}</dd>
               </div>
             </dl>
+            <div className="mt-5">
+              <ReportButton type="landholder" params={{ landholder: landholder.id }} size="sm">
+                Landholder pack (PDF)
+              </ReportButton>
+            </div>
             <p className="mt-5 text-xs text-muted-fg">Last updated {formatDateTime(landholder.updated_at)}</p>
             {can.manage && (
               <div className="mt-4 border-t border-border pt-4">
                 <ConfirmButton
                   variant="ghost"
                   size="sm"
-                  disabled={lots.length > 0}
+                  disabled={rows.length > 0}
                   confirmText={`Delete ${landholder.name} from the landholder register?`}
                   action={deleteLandholder.bind(null, landholder.id)}
                 >
                   <Trash2 /> Delete landholder
                 </ConfirmButton>
-                {lots.length > 0 && (
-                  <p className="mt-1 text-xs text-muted-fg">Landholders with lots can&apos;t be deleted. Move the lots first.</p>
+                {rows.length > 0 && (
+                  <p className="mt-1 text-xs text-muted-fg">Remove this landholder from their lots before deleting them.</p>
                 )}
               </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="lg:col-span-3">
-          <CardHeader title="Lots" description={`${lots.length} lot${lots.length === 1 ? "" : "s"} belonging to this landholder.`} />
-          {lots.length === 0 ? (
-            <p className="px-4 py-6 text-sm text-muted-fg sm:px-5">
-              No lots yet. Choose this landholder when creating or editing a lot.
-            </p>
-          ) : (
-            <ul className="divide-y divide-border">
-              {lots.map((l) => (
-                <li key={l.id}>
-                  <Link href={`/lots/${l.id}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted sm:px-5">
+        <div className="space-y-5 lg:col-span-3">
+          <Card>
+            <CardHeader title="Lots" description={`${rows.length} lot${rows.length === 1 ? "" : "s"} this landholder is linked to.`} />
+            {rows.length === 0 ? (
+              <p className="px-4 py-6 text-sm text-muted-fg sm:px-5">
+                Not linked to any lots yet. Add them from a lot&apos;s Overview, under Landholders.
+              </p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {rows.map(({ link, lot }) => (
+                  <li key={link.id}>
+                    <Link href={`/lots/${lot.id}`} className="flex flex-wrap items-center gap-3 px-4 py-3 hover:bg-muted sm:px-5">
+                      <div className="min-w-0 flex-1">
+                        <p className="flex flex-wrap items-center gap-2 font-medium">
+                          Lot {lot.lot_number} <StatusBadge options={LANDHOLDER_ROLES} value={link.role} />
+                        </p>
+                        <p className="truncate text-xs text-muted-fg">{link.property ?? lot.address ?? "No address"}</p>
+                      </div>
+                      {link.acceptance_date ? (
+                        <Badge tone="green">Accepted {formatDate(link.acceptance_date)}</Badge>
+                      ) : link.restoration_required ? (
+                        <Badge tone="amber">Acceptance needed</Badge>
+                      ) : null}
+                      <ProgressDots lot={lot} />
+                      <StatusBadge options={LOT_STATUSES} value={lot.status} />
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Issued reports" description="Condition reports produced for this landholder, newest first." />
+            {(reports ?? []).length === 0 ? (
+              <p className="px-4 py-6 text-sm text-muted-fg sm:px-5">None yet. Create one from a lot&apos;s Reports tab.</p>
+            ) : (
+              <ul className="divide-y divide-border">
+                {(reports ?? []).map((r) => (
+                  <li key={r.id} className="flex flex-wrap items-center gap-3 px-4 py-3 sm:px-5">
+                    <FileText className="size-4 shrink-0 text-muted-fg" />
                     <div className="min-w-0 flex-1">
-                      <p className="font-medium">Lot {l.lot_number}</p>
-                      <p className="truncate text-xs text-muted-fg">{l.address ?? "No address"}</p>
+                      <p className="truncate text-sm font-medium">{r.title}</p>
+                      <p className="text-xs text-muted-fg">
+                        Lot {lotById.get(r.lot_id)?.lot_number ?? "?"} · {formatDateTime(r.created_at)}
+                        {r.issued_to && ` · for ${r.issued_to}`}
+                      </p>
                     </div>
-                    <ProgressDots lot={l} />
-                    <StatusBadge options={LOT_STATUSES} value={l.status} />
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          )}
-        </Card>
+                    <IssuedReportDownload attachmentId={r.attachment_id} />
+                  </li>
+                ))}
+              </ul>
+            )}
+          </Card>
+        </div>
       </div>
     </>
   );

@@ -9,7 +9,7 @@ import { formatDate } from "@/lib/format";
 import { slugify } from "@/lib/storage";
 import { createClient } from "@/lib/supabase/server";
 import type { PdfPhoto } from "./kit";
-import type { PackDocument } from "./reports";
+import type { PackDocument, ReportLandholder } from "./reports";
 import type { ReportData } from "./types";
 
 type Supabase = Awaited<ReturnType<typeof createClient>>;
@@ -45,13 +45,40 @@ async function photoRefs(supabase: Supabase, attachments: Attachment[], limit: n
   });
 }
 
-/** One lot's surveys, checklist and photos: the body of a Lot Report. */
-async function lotSections(supabase: Supabase, lot: LotOverview) {
-  const [surveys, attachments] = await Promise.all([
+const ROLE_ORDER = ["road_authority", "owner", "adjacent_resident", "occupier", "other"];
+
+/** A lot's landholders in report form, road authority first. */
+export async function reportLandholders(supabase: Supabase, lotId: string): Promise<ReportLandholder[]> {
+  const { data } = await supabase.from("lot_landholders").select("*, landholder:landholders(*)").eq("lot_id", lotId);
+  return (data ?? [])
+    .sort((a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.landholder.name.localeCompare(b.landholder.name))
+    .map((x) => ({
+      name: x.landholder.name,
+      role: x.role,
+      property: x.property,
+      phone: x.landholder.phone,
+      email: x.landholder.email,
+      restoration_required: x.restoration_required,
+      damage_notes: x.damage_notes,
+      acceptance_date: x.acceptance_date,
+      acceptance_name: x.acceptance_name,
+      acceptance_notes: x.acceptance_notes,
+    }));
+}
+
+/**
+ * One lot's landholders, surveys, checklist and photos: the body of a Lot Report.
+ * With `forLandholder`, only that landholder's tagged files and the lot's general files are used.
+ */
+async function lotSections(supabase: Supabase, lot: LotOverview, forLandholder?: string) {
+  const [surveys, attachments, landholders] = await Promise.all([
     supabase.from("surveys").select("*").eq("lot_id", lot.id).order("survey_type"),
     supabase.from("attachments").select("*").eq("lot_id", lot.id).order("created_at"),
+    reportLandholders(supabase, lot.id),
   ]);
-  const files = attachments.data ?? [];
+  const files = (attachments.data ?? []).filter(
+    (f) => !forLandholder || f.landholder_id === null || f.landholder_id === forLandholder,
+  );
   const photos = await Promise.all(
     FILE_CATEGORIES.map(async (c) => ({
       title: `${c.label} photos`,
@@ -62,6 +89,7 @@ async function lotSections(supabase: Supabase, lot: LotOverview) {
     sections: {
       lot,
       checklist: closeoutChecklist(lot),
+      landholders,
       surveys: (surveys.data ?? []).map((s) => ({ ...s, fileCount: files.filter((f) => f.category === s.survey_type).length })),
       photos,
     },
@@ -144,18 +172,22 @@ export async function loadReport(type: string, params: URLSearchParams, profile:
     const landholderId = params.get("landholder");
     let query = supabase.from("landholders").select("*").order("name");
     if (landholderId) query = query.eq("id", landholderId);
-    const [{ data: landholders }, { data: lots }] = await Promise.all([query, supabase.from("lot_overview").select("*")]);
+    const [{ data: landholders }, { data: lots }, { data: links }] = await Promise.all([
+      query,
+      supabase.from("lot_overview").select("*"),
+      supabase.from("lot_landholders").select("lot_id, landholder_id"),
+    ]);
     const sorted = (lots ?? []).sort((a, b) => compareLotNumbers(a.lot_number, b.lot_number));
-    const groups = (landholders ?? []).map((landholder) => ({
-      landholder,
-      lots: sorted.filter((l) => l.landholder_id === landholder.id),
-    }));
+    const groups = (landholders ?? []).map((landholder) => {
+      const lotIds = new Set((links ?? []).filter((x) => x.landholder_id === landholder.id).map((x) => x.lot_id));
+      return { landholder, lots: sorted.filter((l) => lotIds.has(l.id)) };
+    });
     if (landholderId && groups.length === 0) return { error: "Landholder not found", status: 404 };
     if (!landholderId) {
       return { data: { type: "landholder", fileName: `landholder-report-${stamp()}.pdf`, meta, groups } };
     }
     // One landholder: a full pack with every lot and their uploaded PDFs.
-    const lotData = await Promise.all(groups[0].lots.map((lot) => lotSections(supabase, lot)));
+    const lotData = await Promise.all(groups[0].lots.map((lot) => lotSections(supabase, lot, landholderId)));
     const documents = await packDocuments(
       supabase,
       lotData.map((d) => ({ lot: d.sections.lot, files: d.files })),

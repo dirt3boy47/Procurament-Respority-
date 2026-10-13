@@ -8,8 +8,8 @@ const lot = (patch: Partial<Views<"lot_overview">> = {}) =>
     lot_number: "LOT-1",
     pre_survey_status: "complete",
     post_survey_status: "complete",
-    landholder_signoff_date: "2026-10-01",
-    landholder_signoff_name: "J Smith",
+    restorations: 0,
+    acceptances_outstanding: 0,
     ...patch,
   }) as Views<"lot_overview">;
 
@@ -20,10 +20,14 @@ describe("closeoutChecklist", () => {
     expect(items.every((c) => c.done)).toBe(true);
   });
 
+  it("needs no acceptance when no damage was recorded", () => {
+    expect(closeoutChecklist(lot()).find((c) => c.key === "acceptance")?.detail).toBe("No damage recorded - not required");
+  });
+
   it("reports each unmet condition", () => {
-    const items = closeoutChecklist(lot({ post_survey_status: "scheduled", landholder_signoff_date: null }));
+    const items = closeoutChecklist(lot({ post_survey_status: "scheduled", restorations: 3, acceptances_outstanding: 2 }));
     expect(items.filter((c) => !c.done).map((c) => c.key)).toEqual(["post", "acceptance"]);
-    expect(items.find((c) => c.key === "acceptance")?.detail).toBe("Not recorded");
+    expect(items.find((c) => c.key === "acceptance")?.detail).toBe("1 of 3 received");
   });
 
   it("links each condition to the page that fixes it", () => {

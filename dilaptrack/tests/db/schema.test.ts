@@ -73,7 +73,8 @@ describe("landholder registry", () => {
 
   it("can't be deleted while lots belong to it", async () => {
     const [h] = await pmQ<{ id: string }>("insert into public.landholders (name) values ('Temp Owner') returning id");
-    await pmQ("insert into public.lots (lot_number, landholder_id) values ('LOT-TMP', $1)", [h.id]);
+    const [l] = await pmQ<{ id: string }>("insert into public.lots (lot_number) values ('LOT-TMP') returning id");
+    await pmQ("insert into public.lot_landholders (lot_id, landholder_id) values ($1, $2)", [l.id, h.id]);
     await expect(pmQ("delete from public.landholders where id = $1", [h.id])).rejects.toThrow(/foreign key/);
     await pmQ("delete from public.lots where lot_number = 'LOT-TMP'");
     await pmQ("delete from public.landholders where id = $1", [h.id]);
@@ -81,28 +82,25 @@ describe("landholder registry", () => {
 });
 
 describe("lot register and import", () => {
-  it("imports lots, matching or adding landholders and skipping duplicate lots", async () => {
+  it("imports lots, linking one or more landholders and skipping duplicate lots", async () => {
     await pmQ("insert into public.lots (lot_number, address) values ('LOT-001', '1 Main St')");
-    const [{ result }] = await pmQ<{ result: { inserted: number; new_landholders: number; skipped: string[] } }>(
-      "select public.import_lots($1) as result",
-      [
-        JSON.stringify([
-          { lot_number: " lot-001 ", address: "dupe" },
-          { lot_number: "LOT-002", address: "2 Main St", chainage: "1+250", landholder: "j smith" },
-          { lot_number: "LOT-003", status: "on_hold", landholder: "New Owner", landholder_contact: "new@example.com" },
-          { lot_number: "LOT-004", landholder: "new  owner" },
-        ]),
-      ],
-    );
-    expect(result).toEqual({ inserted: 3, new_landholders: 1, skipped: ["lot-001"] });
-    const rows = await viewQ<{ lot_number: string; chainage_m: number | null; status: string; landholder_name: string | null }>(
-      "select lot_number, chainage_m, status, landholder_name from public.lot_overview order by lot_number",
+    const [{ result }] = await pmQ<{ result: Record<string, unknown> }>("select public.import_lots($1) as result", [
+      JSON.stringify([
+        { lot_number: " lot-001 ", address: "dupe" },
+        { lot_number: "LOT-002", address: "2 Main St", chainage: "1+250", landholder: "j smith" },
+        { lot_number: "LOT-003", status: "on_hold", landholder: "New Owner", landholder_contact: "new@example.com" },
+        { lot_number: "LOT-004", landholder: "Toowoomba Regional Council;  new  owner ; J Smith" },
+      ]),
+    ]);
+    expect(result).toEqual({ inserted: 3, new_landholders: 2, linked: 5, skipped: ["lot-001"] });
+    const rows = await viewQ<{ lot_number: string; chainage_m: number | null; status: string; landholder_count: number; landholder_names: string | null }>(
+      "select lot_number, chainage_m, status, landholder_count, landholder_names from public.lot_overview order by lot_number",
     );
     expect(rows).toEqual([
-      { lot_number: "LOT-001", chainage_m: null, status: "not_started", landholder_name: null },
-      { lot_number: "LOT-002", chainage_m: 1250, status: "not_started", landholder_name: "J Smith" },
-      { lot_number: "LOT-003", chainage_m: null, status: "on_hold", landholder_name: "New Owner" },
-      { lot_number: "LOT-004", chainage_m: null, status: "not_started", landholder_name: "New Owner" },
+      { lot_number: "LOT-001", chainage_m: null, status: "not_started", landholder_count: 0, landholder_names: null },
+      { lot_number: "LOT-002", chainage_m: 1250, status: "not_started", landholder_count: 1, landholder_names: "J Smith" },
+      { lot_number: "LOT-003", chainage_m: null, status: "on_hold", landholder_count: 1, landholder_names: "New Owner" },
+      { lot_number: "LOT-004", chainage_m: null, status: "not_started", landholder_count: 3, landholder_names: "J Smith, New Owner, Toowoomba Regional Council" },
     ]);
     const [owner] = await viewQ<{ email: string }>("select email from public.landholders where name = 'New Owner'");
     expect(owner.email).toBe("new@example.com");
@@ -195,37 +193,92 @@ describe("surveys and files", () => {
   });
 });
 
-describe("close-out", () => {
-  it("lists what is blocking close-out and refuses to close", async () => {
-    const lot = await lotId("LOT-002");
-    const [{ blockers }] = await viewQ<{ blockers: string[] }>("select public.lot_closeout_blockers($1) as blockers", [lot]);
-    expect(blockers).toEqual(["Post-construction survey is not complete", "Landholder acceptance has not been recorded"]);
-    await expect(pmQ("update public.lots set status = 'closed' where id = $1", [lot])).rejects.toThrow(
-      /cannot be closed: Post-construction survey/,
+describe("close-out and restoration hold points", () => {
+  async function link(lotNumber: string, name: string, extra: Record<string, unknown> = {}) {
+    const [h] = await pmQ<{ id: string }>(
+      "insert into public.landholders (name) values ($1) on conflict ((lower(name))) do update set name = excluded.name returning id",
+      [name],
     );
-  });
+    const cols = Object.keys(extra);
+    const [row] = await engQ<{ id: string }>(
+      `insert into public.lot_landholders (lot_id, landholder_id${cols.map((c) => `, ${c}`).join("")})
+       values ($1, $2${cols.map((_, i) => `, $${i + 3}`).join("")}) returning id`,
+      [await lotId(lotNumber), h.id, ...Object.values(extra)],
+    );
+    return row.id;
+  }
 
-  it("closes a lot once both surveys and acceptance are done, then freezes its records", async () => {
+  it("needs written acceptance only where there was damage to restore", async () => {
     const lot = await lotId("LOT-002");
+    // J Smith was linked by the import above.
+    await link("LOT-002", "Toowoomba Regional Council", { role: "road_authority" });
+    const resident = await link("LOT-002", "R Jones", {
+      role: "adjacent_resident",
+      property: "18 Gowrie Rd",
+      restoration_required: true,
+      damage_notes: "Driveway crossover cracked by excavator",
+    });
+    const [{ blockers }] = await viewQ<{ blockers: string[] }>("select public.lot_closeout_blockers($1) as blockers", [lot]);
+    expect(blockers).toEqual([
+      "Post-construction survey is not complete",
+      "Written acceptance of restoration is outstanding from R Jones",
+    ]);
+    const [o] = await viewQ<{ landholder_name: string; landholder_count: number; restorations: number; acceptances_outstanding: number }>(
+      "select landholder_name, landholder_count, restorations, acceptances_outstanding from public.lot_overview where id = $1",
+      [lot],
+    );
+    expect(o).toEqual({ landholder_name: "Toowoomba Regional Council", landholder_count: 3, restorations: 1, acceptances_outstanding: 1 });
+
     await engQ(
       "update public.surveys set status = 'complete', survey_date = '2026-12-01', surveyor = 'Sam' where lot_id = $1 and survey_type = 'post_construction'",
       [lot],
     );
-    await pmQ("update public.lots set landholder_signoff_date = '2026-12-06', landholder_signoff_name = 'J Smith' where id = $1", [lot]);
-    const [overview] = await viewQ<{ ready_to_close: boolean }>("select ready_to_close from public.lot_overview where id = $1", [lot]);
-    expect(overview.ready_to_close).toBe(true);
+    await expect(pmQ("update public.lots set status = 'closed' where id = $1", [lot])).rejects.toThrow(/outstanding from R Jones/);
 
+    // Engineers can record damage but not the hold-point acceptance.
+    await expect(
+      engQ("update public.lot_landholders set acceptance_date = '2026-12-06', acceptance_name = 'R Jones' where id = $1", [resident]),
+    ).rejects.toThrow(/Only administrators and project managers can record/);
+    await expect(
+      pmQ("update public.lot_landholders set acceptance_date = '2026-12-06' where id = $1", [resident]),
+    ).rejects.toThrow(/lot_landholders_acceptance_needs_name/);
+    await pmQ("update public.lot_landholders set acceptance_date = '2026-12-06', acceptance_name = 'R Jones' where id = $1", [resident]);
+
+    const [ready] = await viewQ<{ ready_to_close: boolean }>("select ready_to_close from public.lot_overview where id = $1", [lot]);
+    expect(ready.ready_to_close).toBe(true);
     await expect(engQ("update public.lots set status = 'closed' where id = $1 returning id", [lot])).resolves.toHaveLength(0);
     const [closed] = await pmQ<{ status: string; closed_by: string }>(
       "update public.lots set status = 'closed' where id = $1 returning status, closed_by",
       [lot],
     );
     expect(closed).toEqual({ status: "closed", closed_by: pm });
+  });
 
+  it("freezes a closed lot's records but still allows reports to be issued on request", async () => {
+    const lot = await lotId("LOT-002");
+    await expect(engQ("update public.surveys set notes = 'late note' where lot_id = $1", [lot])).rejects.toThrow(/is closed/);
     await expect(
-      engQ("update public.surveys set notes = 'late note' where lot_id = $1", [lot]),
+      engQ("update public.lot_landholders set damage_notes = 'x' where lot_id = $1", [lot]),
     ).rejects.toThrow(/is closed/);
-    await expect(engQ("delete from public.attachments where lot_id = $1", [lot])).rejects.toThrow(/is closed/);
+    await expect(
+      engQ(
+        "insert into public.attachments (lot_id, category, storage_path, file_name, uploaded_by) values ($1, 'closeout', 'LOT-002/closeout/late.pdf', 'late.pdf', $2)",
+        [lot, engineer],
+      ),
+    ).rejects.toThrow(/is closed/);
+
+    const [{ id: lh }] = await viewQ<{ id: string }>("select id from public.landholders where name = 'R Jones'");
+    const [att] = await engQ<{ id: string }>(
+      "insert into public.attachments (lot_id, category, landholder_id, storage_path, file_name, mime_type, uploaded_by) values ($1, 'reports', $2, 'LOT-002/reports/r.pdf', 'r.pdf', 'application/pdf', $3) returning id",
+      [lot, lh, engineer],
+    );
+    await engQ(
+      "insert into public.issued_reports (lot_id, landholder_id, attachment_id, title, issued_to, photo_count) values ($1, $2, $3, 'Condition report', 'Principal', 4)",
+      [lot, lh, att.id],
+    );
+    const [o] = await viewQ<{ issued_report_count: number }>("select issued_report_count from public.lot_overview where id = $1", [lot]);
+    expect(o.issued_report_count).toBe(1);
+    expect(await viewQ("delete from public.issued_reports returning id")).toHaveLength(0);
 
     const [reopened] = await pmQ<{ closed_at: string | null }>(
       "update public.lots set status = 'in_progress' where id = $1 returning closed_at",
@@ -234,19 +287,16 @@ describe("close-out", () => {
     expect(reopened.closed_at).toBeNull();
   });
 
+  it("closes a lot with no damage on the two surveys alone", async () => {
+    await pmQ("insert into public.lots (lot_number) values ('LOT-NODMG')");
+    const lot = await lotId("LOT-NODMG");
+    await link("LOT-NODMG", "J Smith");
+    await engQ("update public.surveys set status = 'complete', survey_date = '2026-01-01', surveyor = 'S' where lot_id = $1", [lot]);
+    await expect(pmQ("update public.lots set status = 'closed' where id = $1 returning id", [lot])).resolves.toHaveLength(1);
+  });
+
   it("still lets a manager delete a closed lot with all of its records", async () => {
-    await pmQ("insert into public.lots (lot_number) values ('LOT-DEL')");
-    const lot = await lotId("LOT-DEL");
-    await engQ(
-      "update public.surveys set status = 'complete', survey_date = '2026-01-01', surveyor = 'S' where lot_id = $1",
-      [lot],
-    );
-    await engQ(
-      "insert into public.attachments (lot_id, category, storage_path, file_name, uploaded_by) values ($1, 'closeout', 'LOT-DEL/closeout/f.pdf', 'f.pdf', $2)",
-      [lot, engineer],
-    );
-    await pmQ("update public.lots set landholder_signoff_date = '2026-02-01', landholder_signoff_name = 'X' where id = $1", [lot]);
-    await pmQ("update public.lots set status = 'closed' where id = $1", [lot]);
+    const lot = await lotId("LOT-NODMG");
     await expect(pmQ("delete from public.lots where id = $1 returning id", [lot])).resolves.toHaveLength(1);
   });
 
@@ -306,7 +356,8 @@ describe("upgrading an existing database", () => {
     });
     const { rows } = await old.query<{ lot_number: string; name: string | null; phone: string | null; email: string | null }>(
       `select l.lot_number, h.name, h.phone, h.email from public.lots l
-       left join public.landholders h on h.id = l.landholder_id order by l.lot_number`,
+       left join public.lot_landholders x on x.lot_id = l.id
+       left join public.landholders h on h.id = x.landholder_id order by l.lot_number`,
     );
     expect(rows).toEqual([
       { lot_number: "A1", name: "Ridge Farming Co", phone: "07 5555 0000", email: null },
@@ -318,6 +369,30 @@ describe("upgrading an existing database", () => {
       "select count(*)::int n from information_schema.tables where table_schema = 'public' and table_name in ('defects', 'reinstatement_items')",
     );
     expect(tables[0].n).toBe(0);
+    await old.close();
+  }, 60_000);
+
+  it("turns each lot's landholder and sign-off into a lot landholder link", async () => {
+    const old = await createDb({
+      "20261015000000_lot_landholders.sql": async (d) => {
+        await d.exec(`
+          insert into public.landholders (name) values ('Ridge Farming Co'), ('M Patel');
+          insert into public.lots (lot_number, landholder_id, landholder_signoff_date, landholder_signoff_name)
+            select 'B1', id, '2026-10-01', 'Ridge Farming Co (by J Ridge)' from public.landholders where name = 'Ridge Farming Co';
+          insert into public.lots (lot_number, landholder_id) select 'B2', id from public.landholders where name = 'M Patel';`);
+      },
+    });
+    const { rows } = await old.query<{ lot_number: string; name: string; role: string; acceptance_date: string | null; acceptance_name: string | null }>(
+      `select l.lot_number, h.name, x.role, x.acceptance_date, x.acceptance_name
+       from public.lot_landholders x join public.lots l on l.id = x.lot_id join public.landholders h on h.id = x.landholder_id
+       order by l.lot_number`,
+    );
+    expect(rows).toEqual([
+      { lot_number: "B1", name: "Ridge Farming Co", role: "owner", acceptance_date: "2026-10-01", acceptance_name: "Ridge Farming Co (by J Ridge)" },
+      { lot_number: "B2", name: "M Patel", role: "owner", acceptance_date: null, acceptance_name: null },
+    ]);
+    const { rows: legacy } = await old.query<{ n: number }>("select count(*)::int n from public.lots where landholder_id is not null");
+    expect(legacy[0].n).toBe(0);
     await old.close();
   }, 60_000);
 });

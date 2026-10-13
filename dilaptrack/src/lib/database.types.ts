@@ -8,7 +8,8 @@ type AppRole = "admin" | "project_manager" | "site_engineer" | "read_only";
 type LotStatus = "not_started" | "in_progress" | "on_hold" | "closed";
 type SurveyType = "pre_construction" | "post_construction";
 type SurveyStatus = "not_started" | "scheduled" | "in_progress" | "complete";
-type FileCategory = "pre_construction" | "post_construction" | "closeout";
+type FileCategory = "pre_construction" | "post_construction" | "closeout" | "reports";
+type LandholderRole = "road_authority" | "owner" | "adjacent_resident" | "occupier" | "other";
 
 type LotRow = {
   id: string;
@@ -70,7 +71,6 @@ export type Database = {
           id?: string;
           lot_number: string;
           address?: string | null;
-          landholder_id?: string | null;
           chainage?: string | null;
           status?: LotStatus;
           assigned_engineer?: string | null;
@@ -82,7 +82,6 @@ export type Database = {
         Update: {
           lot_number?: string;
           address?: string | null;
-          landholder_id?: string | null;
           chainage?: string | null;
           status?: LotStatus;
           assigned_engineer?: string | null;
@@ -156,12 +155,88 @@ export type Database = {
         };
         Relationships: [];
       };
+      lot_landholders: {
+        Row: {
+          id: string;
+          lot_id: string;
+          landholder_id: string;
+          role: LandholderRole;
+          property: string | null;
+          restoration_required: boolean;
+          damage_notes: string | null;
+          acceptance_date: string | null;
+          acceptance_name: string | null;
+          acceptance_notes: string | null;
+          created_at: string;
+          created_by: string | null;
+          updated_at: string;
+          updated_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          lot_id: string;
+          landholder_id: string;
+          role?: LandholderRole;
+          property?: string | null;
+          restoration_required?: boolean;
+          damage_notes?: string | null;
+          acceptance_date?: string | null;
+          acceptance_name?: string | null;
+          acceptance_notes?: string | null;
+        };
+        Update: {
+          role?: LandholderRole;
+          property?: string | null;
+          restoration_required?: boolean;
+          damage_notes?: string | null;
+          acceptance_date?: string | null;
+          acceptance_name?: string | null;
+          acceptance_notes?: string | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: "lot_landholders_landholder_id_fkey";
+            columns: ["landholder_id"];
+            isOneToOne: false;
+            referencedRelation: "landholders";
+            referencedColumns: ["id"];
+          },
+          { foreignKeyName: "lot_landholders_lot_id_fkey"; columns: ["lot_id"]; isOneToOne: false; referencedRelation: "lots"; referencedColumns: ["id"] },
+        ];
+      };
+      issued_reports: {
+        Row: {
+          id: string;
+          lot_id: string;
+          landholder_id: string | null;
+          attachment_id: string;
+          title: string;
+          issued_to: string | null;
+          notes: string | null;
+          photo_count: number;
+          created_at: string;
+          created_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          lot_id: string;
+          landholder_id?: string | null;
+          attachment_id: string;
+          title: string;
+          issued_to?: string | null;
+          notes?: string | null;
+          photo_count?: number;
+        };
+        Update: never;
+        Relationships: [];
+      };
       attachments: {
         Row: {
           id: string;
           lot_id: string;
           category: FileCategory;
           survey_id: string | null;
+          landholder_id: string | null;
           storage_path: string;
           preview_path: string | null;
           file_name: string;
@@ -177,6 +252,7 @@ export type Database = {
           lot_id: string;
           category: FileCategory;
           survey_id?: string | null;
+          landholder_id?: string | null;
           storage_path: string;
           preview_path?: string | null;
           file_name: string;
@@ -187,6 +263,7 @@ export type Database = {
         };
         Update: {
           caption?: string | null;
+          landholder_id?: string | null;
         };
         Relationships: [
           { foreignKeyName: "attachments_lot_id_fkey"; columns: ["lot_id"]; isOneToOne: false; referencedRelation: "lots"; referencedColumns: ["id"] },
@@ -225,6 +302,11 @@ export type Database = {
           post_surveyor: string | null;
           file_count: number;
           ready_to_close: boolean;
+          landholder_count: number;
+          landholder_names: string | null;
+          restorations: number;
+          acceptances_outstanding: number;
+          issued_report_count: number;
         };
         Relationships: [];
       };
@@ -245,6 +327,7 @@ export type Database = {
       survey_type: SurveyType;
       survey_status: SurveyStatus;
       file_category: FileCategory;
+      landholder_role: LandholderRole;
     };
     CompositeTypes: Record<string, never>;
   };

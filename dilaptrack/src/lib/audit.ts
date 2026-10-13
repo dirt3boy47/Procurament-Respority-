@@ -6,6 +6,8 @@ const TABLE_NAMES: Record<string, string> = {
   lots: "lot",
   surveys: "survey",
   landholders: "landholder",
+  lot_landholders: "lot landholder",
+  issued_reports: "issued report",
   attachments: "file",
   profiles: "user",
 };
@@ -13,6 +15,11 @@ const TABLE_NAMES: Record<string, string> = {
 const FIELD_NAMES: Record<string, string> = {
   lot_number: "lot number",
   landholder_id: "landholder",
+  restoration_required: "restoration required",
+  damage_notes: "damage notes",
+  acceptance_date: "acceptance date",
+  acceptance_name: "accepted by",
+  acceptance_notes: "acceptance notes",
   postal_address: "postal address",
   assigned_engineer: "assigned engineer",
   landholder_signoff_date: "landholder acceptance date",

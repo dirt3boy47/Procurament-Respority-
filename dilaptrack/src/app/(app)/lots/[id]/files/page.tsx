@@ -4,7 +4,7 @@ import { FileSection } from "@/components/files/file-section";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth";
 import { FILE_CATEGORIES } from "@/lib/constants";
-import { getAttachments, getLot } from "@/lib/data";
+import { getAttachments, getLot, getLotLandholders } from "@/lib/data";
 import { createClient } from "@/lib/supabase/server";
 import { cn } from "@/lib/utils";
 
@@ -19,10 +19,11 @@ export default async function LotFilesPage({ params, searchParams }: PageProps<"
   const current = FILE_CATEGORIES.find((c) => c.slug === folder) ?? FILE_CATEGORIES[0];
 
   const supabase = await createClient();
-  const [{ data: all }, files, { data: surveys }] = await Promise.all([
+  const [{ data: all }, files, { data: surveys }, links] = await Promise.all([
     supabase.from("attachments").select("category").eq("lot_id", lot.id),
     getAttachments({ lot_id: lot.id, category: current.value }),
     supabase.from("surveys").select("id, survey_type").eq("lot_id", lot.id),
+    getLotLandholders(lot.id),
   ]);
   const counts = new Map<string, number>();
   (all ?? []).forEach((a) => counts.set(a.category, (counts.get(a.category) ?? 0) + 1));
@@ -65,8 +66,14 @@ export default async function LotFilesPage({ params, searchParams }: PageProps<"
             lotNumber={lot.lot_number}
             category={current.value}
             surveyId={surveyId}
-            locked={lot.status === "closed"}
+            locked={lot.status === "closed" || current.value === "reports"}
+            landholders={links.map((l) => ({ id: l.landholder_id, name: l.landholder.name }))}
           />
+          {current.value === "reports" && (
+            <p className="mt-4 text-xs text-muted-fg">
+              Issued reports are created on the lot&apos;s Reports tab, which also records who each was issued to.
+            </p>
+          )}
         </CardContent>
       </Card>
     </div>

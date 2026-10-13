@@ -19,11 +19,13 @@ export function Gallery({
   permissions,
   emptyText = "No files yet.",
   size = "md",
+  landholderNames = {},
 }: {
   items: AttachmentView[];
   permissions: Permissions;
   emptyText?: string;
   size?: "sm" | "md";
+  landholderNames?: Record<string, string>;
 }) {
   const [index, setIndex] = useState<number | null>(null);
 
@@ -57,6 +59,7 @@ export function Gallery({
           onIndex={setIndex}
           onClose={() => setIndex(null)}
           permissions={permissions}
+          landholderNames={landholderNames}
         />
       )}
     </>
@@ -89,12 +92,14 @@ function Lightbox({
   onIndex,
   onClose,
   permissions,
+  landholderNames,
 }: {
   items: AttachmentView[];
   index: number;
   onIndex: (i: number) => void;
   onClose: () => void;
   permissions: Permissions;
+  landholderNames: Record<string, string>;
 }) {
   const router = useRouter();
   const item = items[index];
@@ -169,6 +174,7 @@ function Lightbox({
           <p className="truncate font-medium">{item.file_name}</p>
           <p className="text-xs text-white/60">
             {index + 1} of {items.length} · {formatBytes(item.size_bytes)} · {formatDateTime(item.created_at)}
+            {item.landholder_id && landholderNames[item.landholder_id] && ` · ${landholderNames[item.landholder_id]}`}
           </p>
         </div>
         <div className="flex shrink-0 items-center gap-1">

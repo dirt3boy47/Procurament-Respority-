@@ -1,7 +1,7 @@
 // The PDF reports. Each takes plain data and returns a react-pdf document.
 import { Text, View } from "@react-pdf/renderer";
 import type { ChecklistItem } from "@/lib/closeout";
-import { labelFor, LOT_STATUSES, SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
+import { LANDHOLDER_ROLES, labelFor, LOT_STATUSES, SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
 import type { LotOverview } from "@/lib/data";
 import type { Enums, Tables } from "@/lib/database.types";
 import { formatDate } from "@/lib/format";
@@ -11,10 +11,28 @@ type Meta = { project: string; generatedBy: string };
 type Survey = Tables<"surveys">;
 type Landholder = Tables<"landholders">;
 
+/** A landholder's part in a lot, for reports. */
+export type ReportLandholder = {
+  name: string;
+  role: Enums<"landholder_role">;
+  property: string | null;
+  phone: string | null;
+  email: string | null;
+  restoration_required: boolean;
+  damage_notes: string | null;
+  acceptance_date: string | null;
+  acceptance_name: string | null;
+  acceptance_notes: string | null;
+};
+
 const surveyLabel = (t: Enums<"survey_type">) => SURVEY_TYPES.find((s) => s.value === t)?.label ?? t;
 
 const surveyCell = (status: Enums<"survey_status">, date: string | null) =>
   `${labelFor(SURVEY_STATUSES, status)}${date ? `\n${formatDate(date)}` : ""}`;
+
+/** "None", "1 of 2 accepted"... for a lot's restoration hold points. */
+const holdPointCell = (l: LotOverview) =>
+  l.restorations === 0 ? "None" : `${l.restorations - l.acceptances_outstanding} of ${l.restorations} accepted`;
 
 function lotDetails(lot: LotOverview): [string, string | null][] {
   return [
@@ -22,23 +40,80 @@ function lotDetails(lot: LotOverview): [string, string | null][] {
     ["Status", labelFor(LOT_STATUSES, lot.status)],
     ["Property address", lot.address],
     ["Chainage", lot.chainage],
-    ["Landholder", lot.landholder_name],
-    ["Landholder contact", [lot.landholder_phone, lot.landholder_email].filter(Boolean).join(" / ") || null],
+    ["Landholders", lot.landholder_names],
     ["Assigned engineer", lot.assigned_engineer],
     ["Closed", lot.closed_at ? formatDate(lot.closed_at) : null],
   ];
 }
 
-function Acceptance({ lot }: { lot: LotOverview }) {
-  return lot.landholder_signoff_date ? (
+const acceptanceCell = (l: ReportLandholder) =>
+  l.acceptance_date
+    ? `Accepted ${formatDate(l.acceptance_date)}${l.acceptance_name ? `\nby ${l.acceptance_name}` : ""}`
+    : l.restoration_required
+      ? "OUTSTANDING (hold point)"
+      : "Not required";
+
+/** Landholders on a lot with the damage recorded and the written acceptance (hold point) status. */
+function LandholdersTable({ landholders }: { landholders: ReportLandholder[] }) {
+  return (
     <>
-      <Text>
-        Accepted by {lot.landholder_signoff_name ?? "the landholder"} on {formatDate(lot.landholder_signoff_date)}.
-      </Text>
-      <Notes text={lot.landholder_signoff_notes} />
+      <Table
+        columns={[
+          { header: "Landholder", width: 24 },
+          { header: "Role", width: 14 },
+          { header: "Property", width: 18 },
+          { header: "Contact", width: 20 },
+          { header: "Written acceptance", width: 24 },
+        ]}
+        rows={landholders.map((l) => [
+          l.name,
+          labelFor(LANDHOLDER_ROLES, l.role),
+          l.property,
+          [l.phone, l.email].filter(Boolean).join("\n"),
+          acceptanceCell(l),
+        ])}
+        empty="No landholders linked."
+      />
+      {landholders
+        .filter((l) => l.restoration_required && l.damage_notes)
+        .map((l) => (
+          <View key={l.name} style={{ marginTop: 6 }} wrap={false}>
+            <Text style={styles.kvLabel}>Damage restored - {l.name}</Text>
+            <Notes text={l.damage_notes} />
+          </View>
+        ))}
     </>
-  ) : (
-    <Text style={styles.muted}>Not yet recorded.</Text>
+  );
+}
+
+function SurveysTable({ surveys }: { surveys: (Survey & { fileCount?: number })[] }) {
+  return (
+    <>
+      <Table
+        columns={[
+          { header: "Survey", width: 30 },
+          { header: "Status", width: 15 },
+          { header: "Date", width: 15 },
+          { header: "Surveyor", width: 25 },
+          { header: "Files", width: 15 },
+        ]}
+        rows={surveys.map((s) => [
+          surveyLabel(s.survey_type),
+          labelFor(SURVEY_STATUSES, s.status),
+          formatDate(s.survey_date),
+          s.surveyor,
+          s.fileCount === undefined ? "" : String(s.fileCount),
+        ])}
+      />
+      {surveys
+        .filter((s) => s.notes)
+        .map((s) => (
+          <View key={s.id} style={{ marginTop: 6 }}>
+            <Text style={styles.kvLabel}>{surveyLabel(s.survey_type)} notes</Text>
+            <Notes text={s.notes} />
+          </View>
+        ))}
+    </>
   );
 }
 
@@ -47,12 +122,13 @@ function Acceptance({ lot }: { lot: LotOverview }) {
 type LotSectionProps = {
   lot: LotOverview;
   checklist: ChecklistItem[];
+  landholders: ReportLandholder[];
   surveys: (Survey & { fileCount: number })[];
   photos: { title: string; items: PdfPhoto[] }[];
 };
 
 /** Everything about one lot: shared by the Lot Report and the landholder pack. */
-function LotSections({ lot, checklist, surveys, photos, heading }: LotSectionProps & { heading?: string }) {
+function LotSections({ lot, checklist, landholders, surveys, photos, heading }: LotSectionProps & { heading?: string }) {
   return (
     <>
       <Section title={heading ?? "Lot details"}>
@@ -71,35 +147,12 @@ function LotSections({ lot, checklist, surveys, photos, heading }: LotSectionPro
         />
       </Section>
 
-      <Section title="Dilapidation surveys">
-        <Table
-          columns={[
-            { header: "Survey", width: 30 },
-            { header: "Status", width: 15 },
-            { header: "Date", width: 15 },
-            { header: "Surveyor", width: 25 },
-            { header: "Files", width: 15 },
-          ]}
-          rows={surveys.map((s) => [
-            surveyLabel(s.survey_type),
-            labelFor(SURVEY_STATUSES, s.status),
-            formatDate(s.survey_date),
-            s.surveyor,
-            String(s.fileCount),
-          ])}
-        />
-        {surveys
-          .filter((s) => s.notes)
-          .map((s) => (
-            <View key={s.id} style={{ marginTop: 6 }}>
-              <Text style={styles.kvLabel}>{surveyLabel(s.survey_type)} notes</Text>
-              <Notes text={s.notes} />
-            </View>
-          ))}
+      <Section title="Landholders and written acceptance">
+        <LandholdersTable landholders={landholders} />
       </Section>
 
-      <Section title="Landholder acceptance">
-        <Acceptance lot={lot} />
+      <Section title="Dilapidation surveys">
+        <SurveysTable surveys={surveys} />
       </Section>
 
       {photos
@@ -144,7 +197,7 @@ export function SurveyReport({
             ["Lot number", lot.lot_number],
             ["Chainage", lot.chainage],
             ["Property address", lot.address],
-            ["Landholder", lot.landholder_name],
+            ["Landholders", lot.landholder_names],
           ]}
         />
       </Section>
@@ -209,7 +262,7 @@ export function LandholderReport({
         items={[
           ["Landholders", groups.length],
           ["Lots", lots.length],
-          ["Accepted", lots.filter((l) => l.landholder_signoff_date).length],
+          ["Awaiting acceptance", lots.filter((l) => l.acceptances_outstanding > 0).length],
           ["Closed", lots.filter((l) => l.status === "closed").length],
         ]}
       />
@@ -232,7 +285,7 @@ export function LandholderReport({
                 { header: "Address", width: 28 },
                 { header: "Pre-con", width: 15 },
                 { header: "Post-con", width: 15 },
-                { header: "Accepted", width: 15 },
+                { header: "Hold points", width: 15 },
                 { header: "Status", width: 15 },
               ]}
               rows={lots.map((l) => [
@@ -240,7 +293,7 @@ export function LandholderReport({
                 l.address,
                 surveyCell(l.pre_survey_status, l.pre_survey_date),
                 surveyCell(l.post_survey_status, l.post_survey_date),
-                l.landholder_signoff_date ? formatDate(l.landholder_signoff_date) : "No",
+                holdPointCell(l),
                 labelFor(LOT_STATUSES, l.status),
               ])}
               empty="No lots."
@@ -288,7 +341,7 @@ export function SummaryReport({ meta, lots }: { meta: Meta; lots: LotOverview[] 
   const total = lots.length;
   const pct = (n: number) => (total ? `${n} (${Math.round((n / total) * 100)}%)` : "0");
   const closed = lots.filter((l) => l.status === "closed").length;
-  const awaiting = lots.filter((l) => l.post_survey_status === "complete" && !l.landholder_signoff_date && l.status !== "closed");
+  const awaiting = lots.filter((l) => l.acceptances_outstanding > 0 && l.status !== "closed");
   return (
     <Report title="Project Summary Report" landscape {...meta}>
       <Stats
@@ -296,7 +349,7 @@ export function SummaryReport({ meta, lots }: { meta: Meta; lots: LotOverview[] 
           ["Total lots", total],
           ["Pre-con surveys complete", pct(lots.filter((l) => l.pre_survey_status === "complete").length)],
           ["Post-con surveys complete", pct(lots.filter((l) => l.post_survey_status === "complete").length)],
-          ["Awaiting acceptance", awaiting.length],
+          ["Lots awaiting acceptance", awaiting.length],
           ["Lots closed", pct(closed)],
           ["Lots outstanding", total - closed],
         ]}
@@ -306,28 +359,94 @@ export function SummaryReport({ meta, lots }: { meta: Meta; lots: LotOverview[] 
           columns={[
             { header: "Lot", width: 8 },
             { header: "Address", width: 20 },
-            { header: "Landholder", width: 15 },
+            { header: "Landholders", width: 15 },
             { header: "Chainage", width: 8 },
             { header: "Engineer", width: 11 },
             { header: "Pre-con", width: 10 },
             { header: "Post-con", width: 10 },
-            { header: "Accepted", width: 9 },
+            { header: "Hold points", width: 9 },
             { header: "Status", width: 9 },
           ]}
           rows={lots.map((l) => [
             l.lot_number,
             l.address,
-            l.landholder_name,
+            l.landholder_names,
             l.chainage,
             l.assigned_engineer,
             surveyCell(l.pre_survey_status, l.pre_survey_date),
             surveyCell(l.post_survey_status, l.post_survey_date),
-            l.landholder_signoff_date ? formatDate(l.landholder_signoff_date) : "No",
+            holdPointCell(l),
             labelFor(LOT_STATUSES, l.status),
           ])}
           empty="No lots."
         />
       </Section>
+    </Report>
+  );
+}
+
+// ------------------------------------------------------------------ Custom condition report
+
+export type CustomReportProps = {
+  meta: Meta;
+  title: string;
+  issuedTo: string | null;
+  introduction: string | null;
+  lot: LotOverview;
+  /** Landholder the report is about (null = the whole lot). */
+  landholder: ReportLandholder | null;
+  include: { details: boolean; landholders: boolean; surveys: boolean };
+  landholders: ReportLandholder[];
+  surveys: Survey[];
+  photos: (PdfPhoto & { group: string })[];
+};
+
+/** A report put together on request, with hand-picked photos. */
+export function CustomReport({ meta, title, issuedTo, introduction, lot, landholder, include, landholders, surveys, photos }: CustomReportProps) {
+  const groups = [...new Set(photos.map((p) => p.group))];
+  return (
+    <Report
+      title={title}
+      subtitle={[`Lot ${lot.lot_number}`, lot.address, landholder?.name].filter(Boolean).join(" - ")}
+      {...meta}
+    >
+      <Section title="Report">
+        <KeyValues
+          items={[
+            ["Prepared for", issuedTo],
+            ["Lot", `${lot.lot_number}${lot.chainage ? ` (CH ${lot.chainage})` : ""}`],
+            ["Landholder", landholder ? `${landholder.name}${landholder.property ? ` - ${landholder.property}` : ""}` : "Whole lot"],
+            ["Photographs", String(photos.length)],
+          ]}
+        />
+        <Notes text={introduction} />
+      </Section>
+
+      {include.details && (
+        <Section title="Lot details">
+          {/* A report for one landholder doesn't name the lot's other landholders. */}
+          <KeyValues items={landholder ? lotDetails(lot).filter(([k]) => k !== "Landholders") : lotDetails(lot)} />
+          <Notes text={lot.notes} />
+        </Section>
+      )}
+
+      {include.landholders && (
+        <Section title={landholder ? "Landholder and written acceptance" : "Landholders and written acceptance"}>
+          <LandholdersTable landholders={landholder ? [landholder] : landholders} />
+        </Section>
+      )}
+
+      {include.surveys && (
+        <Section title="Dilapidation surveys">
+          <SurveysTable surveys={surveys} />
+        </Section>
+      )}
+
+      {groups.map((g, i) => (
+        <Section key={g} title={g} breakBefore={i === 0 && (include.details || include.landholders || include.surveys)}>
+          <Photos photos={photos.filter((p) => p.group === g)} perRow={2} />
+        </Section>
+      ))}
     </Report>
   );
 }

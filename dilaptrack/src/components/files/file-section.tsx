@@ -13,6 +13,7 @@ export function FileSection({
   category,
   surveyId,
   locked,
+  landholders = [],
 }: {
   session: Session;
   files: AttachmentView[];
@@ -21,7 +22,9 @@ export function FileSection({
   category: Enums<"file_category">;
   surveyId?: string;
   locked: boolean;
+  landholders?: { id: string; name: string }[];
 }) {
+  const names = Object.fromEntries(landholders.map((l) => [l.id, l.name]));
   const permissions = { userId: session.profile.id, canEdit: session.can.editRecords && !locked, canManage: session.can.manage && !locked };
   const groups = [
     { title: "Photos", items: files.filter((f) => f.kind === "photo") },
@@ -31,7 +34,7 @@ export function FileSection({
   return (
     <div className="space-y-5">
       {session.can.editRecords && !locked && (
-        <FileUploader lotId={lotId} lotNumber={lotNumber} category={category} surveyId={surveyId} />
+        <FileUploader lotId={lotId} lotNumber={lotNumber} category={category} surveyId={surveyId} landholders={landholders} />
       )}
       {files.length === 0 ? (
         <p className="text-sm text-muted-fg">No files uploaded yet.</p>
@@ -43,7 +46,7 @@ export function FileSection({
               <h3 className="mb-2 text-sm font-semibold">
                 {g.title} <span className="font-normal text-muted-fg">({g.items.length})</span>
               </h3>
-              <Gallery items={g.items} permissions={permissions} />
+              <Gallery items={g.items} permissions={permissions} landholderNames={names} />
             </div>
           ))
       )}

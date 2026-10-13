@@ -32,11 +32,12 @@ export type UploadTarget = {
   lotNumber: string;
   category: Enums<"file_category">;
   surveyId?: string | null;
+  landholderId?: string | null;
   caption?: string | null;
 };
 
-/** Upload a file and record it. Throws a readable Error; cleans up storage if the record can't be saved. */
-export async function uploadFile(supabase: SupabaseClient<Database>, file: File, target: UploadTarget) {
+/** Upload a file and record it; returns the attachment id. Throws a readable Error and cleans up storage if the record can't be saved. */
+export async function uploadFile(supabase: SupabaseClient<Database>, file: File, target: UploadTarget): Promise<string> {
   const bucket = supabase.storage.from(STORAGE_BUCKET);
   const path = buildStoragePath(target.lotNumber, target.category, file.name);
   const uploaded: string[] = [];
@@ -60,18 +61,24 @@ export async function uploadFile(supabase: SupabaseClient<Database>, file: File,
       }
     }
 
-    const { error: rowError } = await supabase.from("attachments").insert({
-      lot_id: target.lotId,
-      category: target.category,
-      survey_id: target.surveyId ?? null,
-      storage_path: path,
-      preview_path: previewPath,
-      file_name: file.name,
-      mime_type: file.type || null,
-      size_bytes: file.size,
-      caption: target.caption ?? null,
-    });
+    const { data: row, error: rowError } = await supabase
+      .from("attachments")
+      .insert({
+        lot_id: target.lotId,
+        category: target.category,
+        survey_id: target.surveyId ?? null,
+        landholder_id: target.landholderId ?? null,
+        storage_path: path,
+        preview_path: previewPath,
+        file_name: file.name,
+        mime_type: file.type || null,
+        size_bytes: file.size,
+        caption: target.caption ?? null,
+      })
+      .select("id")
+      .single();
     if (rowError) throw rowError;
+    return row.id;
   } catch (e) {
     if (uploaded.length) await bucket.remove(uploaded);
     const message = (e as { message?: string }).message ?? "Upload failed";

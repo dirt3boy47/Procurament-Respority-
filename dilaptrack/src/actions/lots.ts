@@ -8,19 +8,14 @@ import { actionSession } from "@/lib/auth";
 import type { ImportLot } from "@/lib/import";
 import { MAX_IMPORT_ROWS } from "@/lib/import";
 import { createClient } from "@/lib/supabase/server";
-import { firstIssue, formFields, optionalDate, requiredText, text, uuid } from "@/lib/validation";
+import { firstIssue, formFields, requiredText, text, uuid } from "@/lib/validation";
 import { attachmentPaths, removeFiles } from "./files-cleanup";
 
-const LOT_FIELDS = ["lot_number", "address", "landholder_id", "chainage", "status", "assigned_engineer", "notes"] as const;
+const LOT_FIELDS = ["lot_number", "address", "chainage", "status", "assigned_engineer", "notes"] as const;
 
 const lotSchema = z.object({
   lot_number: requiredText("Lot number", 50),
   address: text(300),
-  landholder_id: z
-    .string()
-    .trim()
-    .refine((v) => v === "" || uuid.safeParse(v).success, "Choose a landholder from the list")
-    .transform((v) => (v === "" ? null : v)),
   chainage: text(50),
   status: z.enum(["not_started", "in_progress", "on_hold"], { message: "Choose a status" }),
   assigned_engineer: text(100),
@@ -32,10 +27,19 @@ export async function createLot(formData: FormData): Promise<ActionResult> {
   if ("error" in session) return fail(session.error);
   const parsed = lotSchema.safeParse(formFields(formData, LOT_FIELDS));
   if (!parsed.success) return fail(firstIssue(parsed.error));
+  const landholderId = String(formData.get("landholder_id") ?? "");
+  if (landholderId && !uuid.safeParse(landholderId).success) return fail("Choose a landholder from the list");
 
   const supabase = await createClient();
   const { data, error } = await supabase.from("lots").insert(parsed.data).select("id").single();
   if (error) return dbError(error);
+  // The first landholder; more can be added on the lot page.
+  if (landholderId) {
+    const { error: linkError } = await supabase
+      .from("lot_landholders")
+      .insert({ lot_id: data.id, landholder_id: landholderId, role: "owner" });
+    if (linkError) return dbError(linkError);
+  }
   revalidatePath("/", "layout");
   return ok(`Lot ${parsed.data.lot_number} created`, data.id);
 }
@@ -87,7 +91,7 @@ const importRowSchema = z.object({
 
 export async function importLots(
   rows: ImportLot[],
-): Promise<ActionResult & { inserted?: number; newLandholders?: number; skipped?: string[] }> {
+): Promise<ActionResult & { inserted?: number; newLandholders?: number; linked?: number; skipped?: string[] }> {
   const session = await actionSession("manage");
   if ("error" in session) return fail(session.error);
   const parsed = z.array(importRowSchema).min(1, "There are no rows to import").max(MAX_IMPORT_ROWS).safeParse(rows);
@@ -96,47 +100,15 @@ export async function importLots(
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("import_lots", { p_rows: parsed.data });
   if (error) return dbError(error);
-  const result = data as { inserted: number; new_landholders: number; skipped: string[] };
+  const result = data as { inserted: number; new_landholders: number; linked: number; skipped: string[] };
   revalidatePath("/", "layout");
   return {
     ...ok(`Imported ${result.inserted} lot${result.inserted === 1 ? "" : "s"}`),
     inserted: result.inserted,
     newLandholders: result.new_landholders,
+    linked: result.linked,
     skipped: result.skipped,
   };
-}
-
-const signoffSchema = z.object({
-  landholder_signoff_date: optionalDate.refine((v) => v !== null, "Enter the date the landholder accepted"),
-  landholder_signoff_name: requiredText("Landholder name", 200),
-  landholder_signoff_notes: text(5000),
-});
-
-export async function recordSignoff(lotId: string, formData: FormData): Promise<ActionResult> {
-  const session = await actionSession("manage");
-  if ("error" in session) return fail(session.error);
-  const parsed = signoffSchema.safeParse(
-    formFields(formData, ["landholder_signoff_date", "landholder_signoff_name", "landholder_signoff_notes"]),
-  );
-  if (!parsed.success) return fail(firstIssue(parsed.error));
-  const supabase = await createClient();
-  const { error } = await supabase.from("lots").update(parsed.data).eq("id", lotId);
-  if (error) return dbError(error);
-  revalidatePath("/", "layout");
-  return ok("Landholder acceptance recorded");
-}
-
-export async function clearSignoff(lotId: string): Promise<ActionResult> {
-  const session = await actionSession("manage");
-  if ("error" in session) return fail(session.error);
-  const supabase = await createClient();
-  const { error } = await supabase
-    .from("lots")
-    .update({ landholder_signoff_date: null, landholder_signoff_name: null, landholder_signoff_notes: null })
-    .eq("id", lotId);
-  if (error) return dbError(error);
-  revalidatePath("/", "layout");
-  return ok("Landholder acceptance removed");
 }
 
 export async function setLotClosed(lotId: string, closed: boolean): Promise<ActionResult> {

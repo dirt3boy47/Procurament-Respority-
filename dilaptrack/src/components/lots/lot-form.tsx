@@ -11,7 +11,7 @@ import type { Tables } from "@/lib/database.types";
 type LotValues = Partial<
   Pick<
     Tables<"lots">,
-    "lot_number" | "address" | "landholder_id" | "chainage" | "status" | "assigned_engineer" | "notes"
+    "lot_number" | "address" | "chainage" | "status" | "assigned_engineer" | "notes"
   >
 >;
 
@@ -27,8 +27,9 @@ export function LotForm({
   action: (formData: FormData) => Promise<ActionResult>;
   lot?: LotValues;
   engineers: string[];
-  landholders: LandholderOption[];
-  canAddLandholder: boolean;
+  /** New lots only: choose the first landholder (more are added on the lot page). */
+  landholders?: LandholderOption[];
+  canAddLandholder?: boolean;
   submitLabel: string;
   onSuccess?: (result: ActionResult) => void;
 }) {
@@ -47,9 +48,16 @@ export function LotForm({
             <Field label="Property address" htmlFor="address" className="sm:col-span-2">
               <Input id="address" name="address" defaultValue={lot.address ?? ""} maxLength={300} autoComplete="off" />
             </Field>
-            <Field label="Landholder" htmlFor="landholder" className="sm:col-span-2" hint="From the landholder register. Search, or add a new one.">
-              <LandholderPicker options={landholders} defaultId={lot.landholder_id} canAdd={canAddLandholder} />
-            </Field>
+            {landholders && (
+              <Field
+                label="Landholder"
+                htmlFor="landholder"
+                className="sm:col-span-2"
+                hint="From the landholder register. Search, or add a new one. More landholders can be added on the lot page."
+              >
+                <LandholderPicker options={landholders} canAdd={Boolean(canAddLandholder)} />
+              </Field>
+            )}
             <Field label="Assigned engineer" htmlFor="assigned_engineer">
               <Input
                 id="assigned_engineer"

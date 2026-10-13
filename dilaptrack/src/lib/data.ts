@@ -49,6 +49,20 @@ export const listLandholders = cache(async () => {
   return data ?? [];
 });
 
+export type LotLandholder = Tables<"lot_landholders"> & { landholder: Tables<"landholders"> };
+
+const ROLE_ORDER = ["road_authority", "owner", "adjacent_resident", "occupier", "other"];
+const byRole = (a: LotLandholder, b: LotLandholder) =>
+  ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role) || a.landholder.name.localeCompare(b.landholder.name);
+
+/** Landholders linked to a lot (road authority first, then owners, residents...). */
+export const getLotLandholders = cache(async (lotId: string): Promise<LotLandholder[]> => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("lot_landholders").select("*, landholder:landholders(*)").eq("lot_id", lotId);
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as LotLandholder[]).sort(byRole);
+});
+
 /** Names of team members, used as suggestions for the assigned engineer. */
 export const teamNames = cache(async () => {
   const supabase = await createClient();

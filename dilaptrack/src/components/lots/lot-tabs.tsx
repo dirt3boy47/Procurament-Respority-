@@ -4,15 +4,16 @@ import Link from "next/link";
 import { useSelectedLayoutSegments } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-export function LotTabs({ lotId, fileCount }: { lotId: string; fileCount: number }) {
+export function LotTabs({ lotId, fileCount, reportCount }: { lotId: string; fileCount: number; reportCount: number }) {
   const segments = useSelectedLayoutSegments();
-  const current = segments.join("/");
+  const current = segments[0] === "reports" ? "reports" : segments.join("/");
   const tabs = [
     { href: "", label: "Overview" },
     { href: "surveys/pre-construction", label: "Pre-Con Survey" },
     { href: "surveys/post-construction", label: "Post-Con Survey" },
     { href: "files", label: "Files", count: fileCount },
     { href: "closeout", label: "Close-out" },
+    { href: "reports", label: "Reports", count: reportCount },
     { href: "history", label: "History" },
   ];
   return (

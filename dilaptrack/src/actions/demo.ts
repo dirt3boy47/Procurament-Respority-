@@ -26,7 +26,7 @@ export async function removeDemoData(): Promise<ActionResult> {
   }
 
   const { data: owners } = await supabase.from("landholders").select("id").eq("notes", DEMO_NOTE);
-  const { data: stillUsed } = await supabase.from("lots").select("landholder_id").not("landholder_id", "is", null);
+  const { data: stillUsed } = await supabase.from("lot_landholders").select("landholder_id");
   const used = new Set((stillUsed ?? []).map((l) => l.landholder_id));
   const removable = (owners ?? []).map((o) => o.id).filter((id) => !used.has(id));
   if (removable.length) {

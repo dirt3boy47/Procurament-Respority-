@@ -3,11 +3,12 @@ import type { ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteLot } from "@/actions/lots";
 import { EditLotButton } from "@/components/lots/edit-lot";
+import { LotLandholders } from "@/components/lots/lot-landholders";
 import { closeoutChecklist, StepIcon } from "@/components/lots/progress";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { requireSession } from "@/lib/auth";
-import { getLot, listLandholders, teamNames } from "@/lib/data";
+import { getLot, getLotLandholders, listLandholders, teamNames } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
 
 export async function generateMetadata({ params }: PageProps<"/lots/[id]">) {
@@ -18,21 +19,14 @@ export async function generateMetadata({ params }: PageProps<"/lots/[id]">) {
 export default async function LotOverviewPage({ params }: PageProps<"/lots/[id]">) {
   const { can } = await requireSession();
   const lot = await getLot((await params).id);
+  const [links, register] = await Promise.all([getLotLandholders(lot.id), listLandholders()]);
+  const locked = lot.status === "closed";
   const checklist = closeoutChecklist(lot);
   const done = checklist.filter((c) => c.done).length;
 
   const details: [string, ReactNode][] = [
     ["Lot number", lot.lot_number],
     ["Property address", lot.address],
-    [
-      "Landholder",
-      lot.landholder_id ? (
-        <Link href={`/landholders/${lot.landholder_id}`} className="text-primary hover:underline">
-          {lot.landholder_name}
-        </Link>
-      ) : null,
-    ],
-    ["Landholder phone / email", [lot.landholder_phone, lot.landholder_email].filter(Boolean).join(" · ") || null],
     ["Chainage", lot.chainage],
     ["Assigned engineer", lot.assigned_engineer],
     [
@@ -50,15 +44,7 @@ export default async function LotOverviewPage({ params }: PageProps<"/lots/[id]"
       <Card className="lg:col-span-3">
         <CardHeader
           title="Lot details"
-          actions={
-            can.manage && (
-              <EditLotButton
-                lot={lot}
-                engineers={await teamNames()}
-                landholders={(await listLandholders()).map((l) => ({ id: l.id, name: l.name, phone: l.phone }))}
-              />
-            )
-          }
+          actions={can.manage && <EditLotButton lot={lot} engineers={await teamNames()} />}
         />
         <CardContent>
           <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
@@ -97,11 +83,25 @@ export default async function LotOverviewPage({ params }: PageProps<"/lots/[id]"
         </ul>
       </Card>
 
+      <Card className="lg:col-span-5">
+        <CardHeader
+          title="Landholders"
+          description="Everyone with an interest in this lot. Tick damage on a property to make their written acceptance of restoration a hold point."
+        />
+        <LotLandholders
+          lotId={lot.id}
+          links={links}
+          options={register.map((h) => ({ id: h.id, name: h.name, phone: h.phone }))}
+          canEdit={can.editRecords && !locked}
+          canManage={can.manage && !locked}
+        />
+      </Card>
+
       {can.manage && (
         <Card className="border-red-200 lg:col-span-5 dark:border-red-900">
           <CardHeader
             title="Delete lot"
-            description="Permanently removes this lot with its surveys and files. The landholder stays in the register. The audit log keeps a record."
+            description="Permanently removes this lot with its surveys, files and issued reports. Landholders stay in the register. The audit log keeps a record."
             actions={
               <ConfirmButton
                 variant="danger"

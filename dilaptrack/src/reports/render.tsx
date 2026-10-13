@@ -3,12 +3,12 @@
 import { pdf } from "@react-pdf/renderer";
 import type { PdfPhoto } from "./kit";
 import type { PackDocument } from "./reports";
-import { LandholderReport, LotReport, SummaryReport, SurveyReport } from "./reports";
+import { CustomReport, LandholderReport, LotReport, SummaryReport, SurveyReport, type CustomReportProps } from "./reports";
 import type { ReportData } from "./types";
 
 /** Download photos up front (6 at a time). Photos that fail to load are left out. */
-async function localise(photos: PdfPhoto[], objectUrls: string[]): Promise<PdfPhoto[]> {
-  const out: (PdfPhoto | null)[] = new Array(photos.length).fill(null);
+async function localise<T extends PdfPhoto>(photos: T[], objectUrls: string[]): Promise<T[]> {
+  const out: (T | null)[] = new Array(photos.length).fill(null);
   let next = 0;
   async function worker() {
     while (next < photos.length) {
@@ -25,7 +25,7 @@ async function localise(photos: PdfPhoto[], objectUrls: string[]): Promise<PdfPh
     }
   }
   await Promise.all(Array.from({ length: 6 }, worker));
-  return out.filter((p): p is PdfPhoto => p !== null);
+  return out.filter((p): p is T => p !== null);
 }
 
 export async function renderReport(data: ReportData): Promise<Blob> {
@@ -115,4 +115,15 @@ async function appendDocuments(report: Blob, documents: PackDocument[]): Promise
   }
 
   return new Blob([new Uint8Array(await merged.save())], { type: "application/pdf" });
+}
+
+/** Draw a custom condition report (hand-picked photos) as a PDF blob. */
+export async function renderCustomReport(props: CustomReportProps): Promise<Blob> {
+  const objectUrls: string[] = [];
+  try {
+    const photos = await localise(props.photos, objectUrls);
+    return await pdf(<CustomReport {...props} photos={photos} />).toBlob();
+  } finally {
+    objectUrls.forEach((u) => URL.revokeObjectURL(u));
+  }
 }

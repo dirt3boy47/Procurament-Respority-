@@ -24,9 +24,12 @@ export function closeoutChecklist(lot: Lot): ChecklistItem[] {
     },
     {
       key: "acceptance",
-      label: "Landholder acceptance recorded",
-      done: Boolean(lot.landholder_signoff_date),
-      detail: lot.landholder_signoff_date ? `Accepted by ${lot.landholder_signoff_name ?? "landholder"}` : "Not recorded",
+      label: "Written acceptance of restoration (hold point)",
+      done: lot.acceptances_outstanding === 0,
+      detail:
+        lot.restorations === 0
+          ? "No damage recorded - not required"
+          : `${lot.restorations - lot.acceptances_outstanding} of ${lot.restorations} received`,
       href: `${base}/closeout`,
     },
   ];

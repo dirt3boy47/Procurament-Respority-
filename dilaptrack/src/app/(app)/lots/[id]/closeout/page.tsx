@@ -1,14 +1,18 @@
 import Link from "next/link";
 import { CheckCircle2, Lock, LockOpen } from "lucide-react";
-import { clearSignoff, setLotClosed } from "@/actions/lots";
+import { clearAcceptance } from "@/actions/lot-landholders";
+import { setLotClosed } from "@/actions/lots";
 import { FileSection } from "@/components/files/file-section";
+import { AcceptanceBadge } from "@/components/lots/lot-landholders";
 import { closeoutChecklist, StepIcon } from "@/components/lots/progress";
+import { StatusBadge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { requireSession } from "@/lib/auth";
-import { getAttachments, getLot } from "@/lib/data";
+import { LANDHOLDER_ROLES } from "@/lib/constants";
+import { getAttachments, getLot, getLotLandholders } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
-import { SignoffForm } from "./signoff-form";
+import { AcceptanceForm } from "./signoff-form";
 
 export async function generateMetadata({ params }: PageProps<"/lots/[id]/closeout">) {
   return { title: `Close-out · Lot ${(await getLot((await params).id)).lot_number}` };
@@ -17,13 +21,14 @@ export async function generateMetadata({ params }: PageProps<"/lots/[id]/closeou
 export default async function CloseoutPage({ params }: PageProps<"/lots/[id]/closeout">) {
   const session = await requireSession();
   const lot = await getLot((await params).id);
-  const files = await getAttachments({ lot_id: lot.id, category: "closeout" });
+  const [files, links] = await Promise.all([getAttachments({ lot_id: lot.id, category: "closeout" }), getLotLandholders(lot.id)]);
   const checklist = closeoutChecklist(lot);
   const closed = lot.status === "closed";
   const { manage } = session.can;
+  const holdPoints = links.filter((l) => l.restoration_required || l.acceptance_date);
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+    <div className="grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
       <Card className={closed ? "border-emerald-300 dark:border-emerald-800" : undefined}>
         <CardHeader
           title="Close-out checklist"
@@ -64,7 +69,7 @@ export default async function CloseoutPage({ params }: PageProps<"/lots/[id]/clo
               <ConfirmButton
                 variant="primary"
                 action={setLotClosed.bind(null, lot.id, true)}
-                confirmText={`Close lot ${lot.lot_number}? Its records will be locked.`}
+                confirmText={`Close lot ${lot.lot_number}? Its records will be locked. Reports can still be issued.`}
                 disabled={!lot.ready_to_close}
               >
                 <Lock /> Close lot
@@ -77,38 +82,63 @@ export default async function CloseoutPage({ params }: PageProps<"/lots/[id]/clo
       <div className="space-y-5">
         <Card>
           <CardHeader
-            title="Landholder acceptance"
-            description="Final acceptance by the landholder that the property has been returned to its pre-construction condition."
+            title="Written acceptance of restoration"
+            description="Hold point: required from each landholder whose property was damaged and restored."
           />
-          <CardContent>
-            {lot.landholder_signoff_date ? (
-              <div className="space-y-3">
-                <p className="flex items-start gap-2 text-sm">
-                  <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
-                  <span>
-                    Accepted by <strong>{lot.landholder_signoff_name}</strong> on {formatDate(lot.landholder_signoff_date)}.
-                  </span>
-                </p>
-                {lot.landholder_signoff_notes && <p className="text-sm whitespace-pre-wrap text-muted-fg">{lot.landholder_signoff_notes}</p>}
-                {manage && !closed && (
-                  <ConfirmButton
-                    size="sm"
-                    variant="ghost"
-                    action={clearSignoff.bind(null, lot.id)}
-                    confirmText="Remove the recorded landholder acceptance?"
-                  >
-                    Remove acceptance
-                  </ConfirmButton>
-                )}
-              </div>
-            ) : manage && !closed ? (
-              <SignoffForm lotId={lot.id} landholder={lot.landholder_name ?? ""} />
-            ) : (
-              <p className="text-sm text-muted-fg">
-                Not recorded yet. {session.can.editRecords && "Upload the signed acceptance form below and ask a project manager to record it."}
-              </p>
-            )}
-          </CardContent>
+          {holdPoints.length === 0 ? (
+            <p className="flex items-start gap-2 px-4 py-4 text-sm sm:px-5">
+              <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-emerald-600" />
+              <span>
+                No damage recorded against any landholder on this lot, so no written acceptance is required. Record damage
+                on the lot&apos;s <Link href={`/lots/${lot.id}`} className="text-primary hover:underline">Overview</Link> if
+                restoration is needed.
+              </span>
+            </p>
+          ) : (
+            <ul className="divide-y divide-border">
+              {holdPoints.map((l) => (
+                <li key={l.id} className="space-y-3 px-4 py-4 sm:px-5">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="font-medium">{l.landholder.name}</span>
+                    <StatusBadge options={LANDHOLDER_ROLES} value={l.role} />
+                    <AcceptanceBadge link={l} />
+                  </div>
+                  {l.property && <p className="text-xs text-muted-fg">{l.property}</p>}
+                  {l.damage_notes && (
+                    <p className="text-sm whitespace-pre-wrap">
+                      <span className="font-medium">Damage restored: </span>
+                      {l.damage_notes}
+                    </p>
+                  )}
+                  {l.acceptance_date ? (
+                    <div className="space-y-2 text-sm">
+                      <p>
+                        Accepted in writing by <strong>{l.acceptance_name}</strong> on {formatDate(l.acceptance_date)}.
+                      </p>
+                      {l.acceptance_notes && <p className="whitespace-pre-wrap text-muted-fg">{l.acceptance_notes}</p>}
+                      {manage && !closed && (
+                        <ConfirmButton
+                          size="sm"
+                          variant="ghost"
+                          action={clearAcceptance.bind(null, l.id)}
+                          confirmText={`Remove the recorded acceptance from ${l.landholder.name}?`}
+                        >
+                          Remove acceptance
+                        </ConfirmButton>
+                      )}
+                    </div>
+                  ) : manage && !closed ? (
+                    <AcceptanceForm linkId={l.id} defaultName={l.landholder.name} />
+                  ) : (
+                    <p className="text-sm text-muted-fg">
+                      Waiting for written acceptance.{" "}
+                      {session.can.editRecords && "Upload the signed form below; a project manager records the acceptance."}
+                    </p>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
         </Card>
 
         <Card>
@@ -121,6 +151,7 @@ export default async function CloseoutPage({ params }: PageProps<"/lots/[id]/clo
               lotNumber={lot.lot_number}
               category="closeout"
               locked={closed}
+              landholders={links.map((l) => ({ id: l.landholder_id, name: l.landholder.name }))}
             />
           </CardContent>
         </Card>

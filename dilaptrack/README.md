@@ -10,15 +10,17 @@ Storage, Row Level Security) · Cloudflare Workers (via OpenNext), or Vercel.
 
 | Area | Details |
 |---|---|
-| **Dashboard** | Total lots, pre/post-construction surveys complete, lots awaiting landholder acceptance, lots closed / outstanding, lots by status, upcoming surveys (overdue highlighted), lots ready to close, recent activity. |
-| **Lot register** | Lot number, address, landholder, chainage, status, assigned engineer, notes. Search, filter (status, engineer, outstanding surveys, ready to close), sort by lot number or chainage, CSV export. Phone-friendly card view. |
-| **Landholder register** | Landowners and occupiers: name, phone, email, postal address, notes, and the lots each one owns. On the lot form, choose the landholder from a searchable list, or add a new one without leaving the form. Names are unique, ignoring case and spacing. A landholder with lots can't be deleted. CSV export. |
-| **Lot import** | Excel (.xlsx) or CSV. Columns are auto-matched by heading (and can be changed). Every row is validated in a preview before anything is saved. Duplicate lots within the file are flagged, and lot numbers already in the register are skipped, never overwritten. Landholder names are matched to the register; new names are added to it with the phone or email from the file. |
+| **Dashboard** | Total lots, pre/post-construction surveys complete, open hold points (written acceptance of restoration outstanding), lots closed / outstanding, lots by status, upcoming surveys (overdue highlighted), lots ready to close, recent activity. |
+| **Lot register** | Lot number, address, landholders, chainage, status, assigned engineer, notes. Search, filter (status, engineer, outstanding surveys, ready to close), sort by lot number or chainage, CSV export. Phone-friendly card view. |
+| **Landholder register** | Landowners and occupiers: name, phone, email, postal address, notes, their lots and the reports issued to them. Choose landholders from a searchable list, or add a new one without leaving the form. Names are unique, ignoring case and spacing. A landholder with lots can't be deleted. CSV export. |
+| **Lot import** | Excel (.xlsx) or CSV. Columns are auto-matched by heading (and can be changed). Every row is validated in a preview before anything is saved. Duplicate lots within the file are flagged, and lot numbers already in the register are skipped, never overwritten. Landholder names are matched to the register; new names are added to it with the phone or email from the file. Several landholders on one lot are separated with a semicolon. |
 | **Surveys** | One pre-construction and one post-construction survey per lot, created automatically: date, surveyor, notes, status, photos, videos and the PDF report. |
-| **Files** | Supabase Storage, organised per lot: `LOT-001/pre-construction`, `post-construction`, `closeout`. Drag-and-drop or "Take photo" on phones. Gallery with full-screen viewer, captions and download. Originals are kept untouched; a small JPEG preview is generated in the browser for fast galleries and PDF reports. |
-| **Close-out** | A lot can only be closed when the pre-construction survey is complete, the post-construction survey is complete, and landholder acceptance is recorded (name, date, notes, plus the signed form in the Closeout folder). The database enforces this as well as the UI. A closed lot's records are locked until it is reopened. |
+| **Landholders on a lot** | A lot can have any number of landholders, each with a role (road authority, owner, adjacent resident, occupier, other) and the property concerned. E.g. a street section where the council owns the road reserve and residences sit alongside. Damage needing restoration is recorded per landholder. |
+| **Files** | Supabase Storage, organised per lot: `LOT-001/pre-construction`, `post-construction`, `closeout`, `reports`. Files can be tagged to the landholder whose property they show. Drag-and-drop or "Take photo" on phones. Gallery with full-screen viewer, captions and download. Originals are kept untouched; a small JPEG preview is generated in the browser for fast galleries and PDF reports. |
+| **Close-out** | A lot can only be closed when the pre-construction and post-construction surveys are complete and every hold point is released. Written owner acceptance of restoration is a hold point **only for landholders whose property was damaged**; lots with no damage need no acceptance. Acceptance (name, date, notes, plus the signed form) is recorded per landholder by a project manager. The database enforces this as well as the UI. A closed lot's records are locked until it is reopened, except that reports can still be issued. |
+| **Reports on request** | Each lot has a Reports tab to build a condition report at any time, including after close-out: for the whole lot or one landholder, prepared for whoever asked (e.g. the Principal), with an introduction, chosen sections, and exactly the photos you pick. *Create and save* stores the PDF in the lot's `reports` folder and logs it against the lot and landholder, so a copy is always available on request. |
 | **Reports (PDF)** | Project Summary, Individual Lot Report, Dilapidation Survey Report (photographic record) and Landholder Report. For one landholder, the Landholder Report is a single combined pack: their details, every lot's full report and survey photos, and every PDF uploaded to their lots (survey reports, signed forms) merged in as a labelled appendix. For all landholders, it is a contact and status summary. The server returns the report data (permission-checked); the PDF is drawn in the browser, so photo-heavy reports don't hit server CPU limits. |
-| **Demo data** | Users → Demo data → *Load demo data* (administrators) adds 8 landholders and 12 lots, DEMO-01 to DEMO-12. They cover every stage from not started to closed, with sample photos, survey reports and signed acceptance forms. *Remove demo data* deletes them again, including their files. |
+| **Demo data** | Users → Demo data → *Load demo data* (administrators) adds 14 landholders and 14 lots, DEMO-01 to DEMO-12 plus street sections DEMO-SL04 and DEMO-SL05 (council road reserve with residences alongside). They cover every stage from not started to closed, with damage and open hold points, sample photos, survey reports, signed acceptance forms and a report issued after close-out. *Remove demo data* deletes them again, including their files. |
 | **Audit trail** | Every insert, update and delete on lots, surveys, landholders, files and user roles is recorded by a database trigger: who, when, and before → after for each field. History tab per lot, plus a project-wide audit log. The log can't be edited through the app or API. |
 | **Other** | Dark mode (light / dark / system), responsive layout with a bottom tab bar on phones, Australian date formats. |
 
@@ -27,8 +29,8 @@ Storage, Row Level Security) · Cloudflare Workers (via OpenNext), or Vercel.
 | Role | Can |
 |---|---|
 | Administrator | Everything, including inviting users and changing roles. |
-| Project Manager | View and manage all records: lot register, import, landholder acceptance, close/reopen lots, delete lots and landholders. |
-| Site Engineer | View everything; fill in surveys; upload photos, videos and documents; add and update landholders; delete their own uploads. |
+| Project Manager | View and manage all records: lot register, import, written acceptance (hold points), close/reopen lots, delete lots and landholders. |
+| Site Engineer | View everything; fill in surveys; upload photos, videos and documents; add and update landholders and record damage; create reports; delete their own uploads. |
 | Read Only | View records and download reports. |
 
 The same rules are enforced by Row Level Security in Postgres and Storage policies, so the UI is not the only line
@@ -48,6 +50,7 @@ dilaptrack/
 ├── supabase/
 │   ├── migrations/…_dilaptrack_init.sql   Schema, RLS, triggers (audit, close-out, lot import), storage bucket + policies
 │   ├── migrations/…_dilap_focus.sql       Removes defects/reinstatement; adds the landholder register
+│   ├── migrations/…_lot_landholders.sql   Several landholders per lot, damage-only hold points, issued reports
 │   ├── templates/                          Invite / password-reset / magic-link emails
 │   ├── seed.sql                            A few lots for local development
 │   └── config.toml                         Local Supabase settings
@@ -171,6 +174,8 @@ Recognised headings include *Lot / Lot No / Lot Number*, *Address / Property Add
 *Contact / Phone / Email*, *Chainage / CH*, *Status*, *Engineer / Assigned Engineer*, *Notes / Comments*. Only the
 lot number is required. Status may be *Not started*, *In progress* or *On hold*, or blank. Lots can't be imported
 as closed. Chainage can be written `12+345`, `CH 12345` or `12345` and is sorted numerically.
+For a lot with several landholders, list them in one cell separated by semicolons (e.g. `TRC; P & R Walsh; Emma Clarke`);
+the contact goes to the first. Set roles, properties and damage afterwards on the lot's Landholders card.
 
 ## Notes on design decisions
 

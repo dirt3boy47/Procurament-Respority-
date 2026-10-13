@@ -7,15 +7,23 @@ import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireSession } from "@/lib/auth";
 import { listLandholders, listLots } from "@/lib/data";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Landholders" };
 
 export default async function LandholdersPage() {
   const { can } = await requireSession();
-  const [landholders, lots] = await Promise.all([listLandholders(), listLots()]);
+  const supabase = await createClient();
+  const [landholders, lots, { data: links }] = await Promise.all([
+    listLandholders(),
+    listLots(),
+    supabase.from("lot_landholders").select("lot_id, landholder_id"),
+  ]);
+  const lotNumber = new Map(lots.map((l) => [l.id, l.lot_number]));
   const lotsByLandholder: Record<string, string[]> = {};
-  for (const lot of lots) {
-    if (lot.landholder_id) (lotsByLandholder[lot.landholder_id] ??= []).push(lot.lot_number);
+  for (const link of links ?? []) {
+    const n = lotNumber.get(link.lot_id);
+    if (n) (lotsByLandholder[link.landholder_id] ??= []).push(n);
   }
 
   return (

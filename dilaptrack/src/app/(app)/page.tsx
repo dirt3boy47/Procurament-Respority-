@@ -47,9 +47,7 @@ export default async function DashboardPage() {
   const postDone = lots.filter((l) => l.post_survey_status === "complete").length;
   const closed = lots.filter((l) => l.status === "closed").length;
   const ready = lots.filter((l) => l.ready_to_close && l.status !== "closed");
-  const awaitingAcceptance = lots.filter(
-    (l) => l.post_survey_status === "complete" && !l.landholder_signoff_date && l.status !== "closed",
-  );
+  const awaitingAcceptance = lots.filter((l) => l.acceptances_outstanding > 0 && l.status !== "closed");
 
   if (total === 0) {
     return (
@@ -109,9 +107,9 @@ export default async function DashboardPage() {
           href="/lots?post=incomplete"
         />
         <StatCard
-          label="Awaiting acceptance"
-          value={awaitingAcceptance.length}
-          detail="Post-con done, no landholder sign-off"
+          label="Hold points open"
+          value={awaitingAcceptance.reduce((n, l) => n + l.acceptances_outstanding, 0)}
+          detail={`Written acceptance of restoration outstanding on ${awaitingAcceptance.length} lot${awaitingAcceptance.length === 1 ? "" : "s"}`}
           icon={PenLine}
           accent="text-amber-600 dark:text-amber-400"
         />
@@ -179,7 +177,7 @@ export default async function DashboardPage() {
                             Lot {lot?.lot_number ?? "?"} · {type.label.replace(" Survey", "")}
                           </p>
                           <p className="truncate text-xs text-muted-fg">
-                            {[lot?.landholder_name, s.surveyor].filter(Boolean).join(" · ") || "No surveyor yet"}
+                            {[lot?.landholder_names, s.surveyor].filter(Boolean).join(" · ") || "No surveyor yet"}
                           </p>
                         </div>
                         <div className="flex shrink-0 flex-col items-end gap-1">
@@ -198,13 +196,13 @@ export default async function DashboardPage() {
 
           {awaitingAcceptance.length > 0 && (
             <Card>
-              <CardHeader title="Awaiting landholder acceptance" description="Post-construction survey complete." />
+              <CardHeader title="Awaiting written acceptance" description="Restoration hold points still open." />
               <ul className="divide-y divide-border">
                 {awaitingAcceptance.slice(0, 8).map((l) => (
                   <li key={l.id}>
                     <Link href={`/lots/${l.id}/closeout`} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-muted sm:px-5">
                       <span className="font-medium">Lot {l.lot_number}</span>
-                      <span className="truncate text-muted-fg">{l.landholder_name ?? "No landholder"}</span>
+                      <span className="truncate text-muted-fg">{l.acceptances_outstanding} outstanding</span>
                     </Link>
                   </li>
                 ))}
@@ -216,7 +214,7 @@ export default async function DashboardPage() {
         <div className="space-y-5">
           {ready.length > 0 && (
             <Card>
-              <CardHeader title="Ready to close" description="Both surveys complete and landholder acceptance recorded." />
+              <CardHeader title="Ready to close" description="Both surveys complete and no hold points open." />
               <ul className="flex flex-wrap gap-2 px-4 py-3 sm:px-5">
                 {ready.map((l) => (
                   <li key={l.id}>

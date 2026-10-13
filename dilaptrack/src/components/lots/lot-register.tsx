@@ -10,7 +10,6 @@ import { Input, Select } from "@/components/ui/input";
 import { LOT_STATUSES, SURVEY_STATUSES } from "@/lib/constants";
 import type { LotOverview } from "@/lib/data";
 import { downloadCsv } from "@/lib/csv";
-import { formatDate } from "@/lib/format";
 
 export type LotFilters = { q: string; status: string; engineer: string; pre: string; post: string; sort: string };
 
@@ -18,7 +17,7 @@ const compareLot = (a: string, b: string) => a.localeCompare(b, undefined, { num
 
 function matches(lot: LotOverview, f: LotFilters) {
   if (f.q) {
-    const hay = [lot.lot_number, lot.address, lot.landholder_name, lot.chainage, lot.assigned_engineer].join(" ").toLowerCase();
+    const hay = [lot.lot_number, lot.address, lot.landholder_names, lot.chainage, lot.assigned_engineer].join(" ").toLowerCase();
     if (!f.q.toLowerCase().split(/\s+/).every((word) => hay.includes(word))) return false;
   }
   if (f.status === "open") {
@@ -61,13 +60,11 @@ export function LotRegister({ lots, initial }: { lots: LotOverview[]; initial: L
   function exportCsv() {
     downloadCsv(
       "lot-register.csv",
-      ["Lot Number", "Property Address", "Landholder", "Landholder Phone", "Landholder Email", "Chainage", "Status", "Assigned Engineer", "Pre-Con Survey", "Pre-Con Date", "Post-Con Survey", "Post-Con Date", "Landholder Acceptance", "Notes"],
+      ["Lot Number", "Property Address", "Landholders", "Chainage", "Status", "Assigned Engineer", "Pre-Con Survey", "Pre-Con Date", "Post-Con Survey", "Post-Con Date", "Restorations", "Acceptances Outstanding", "Issued Reports", "Notes"],
       rows.map((l) => [
         l.lot_number,
         l.address,
-        l.landholder_name,
-        l.landholder_phone,
-        l.landholder_email,
+        l.landholder_names,
         l.chainage,
         LOT_STATUSES.find((s) => s.value === l.status)?.label,
         l.assigned_engineer,
@@ -75,7 +72,9 @@ export function LotRegister({ lots, initial }: { lots: LotOverview[]; initial: L
         l.pre_survey_date,
         SURVEY_STATUSES.find((s) => s.value === l.post_survey_status)?.label,
         l.post_survey_date,
-        l.landholder_signoff_date,
+        l.restorations,
+        l.acceptances_outstanding,
+        l.issued_report_count,
         l.notes,
       ]),
     );
@@ -161,10 +160,10 @@ export function LotRegister({ lots, initial }: { lots: LotOverview[]; initial: L
                 <StatusBadge options={LOT_STATUSES} value={l.status} />
               </div>
               <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-muted-fg">
-                {l.landholder_name && <span>{l.landholder_name}</span>}
+                {l.landholder_names && <span>{l.landholder_names}</span>}
                 {l.chainage && <span>CH {l.chainage}</span>}
                 <ProgressDots lot={l} />
-                {l.landholder_signoff_date && <Badge tone="green">Accepted</Badge>}
+                {l.acceptances_outstanding > 0 && <Badge tone="amber">Acceptance needed</Badge>}
               </div>
             </Link>
           </li>
@@ -182,7 +181,7 @@ export function LotRegister({ lots, initial }: { lots: LotOverview[]; initial: L
               <th className="px-3 py-2.5">Engineer</th>
               <th className="px-3 py-2.5">Pre-con</th>
               <th className="px-3 py-2.5">Post-con</th>
-              <th className="px-3 py-2.5">Accepted</th>
+              <th className="px-3 py-2.5">Hold points</th>
               <th className="px-3 py-2.5">Close-out</th>
               <th className="px-3 py-2.5">Status</th>
             </tr>
@@ -197,7 +196,9 @@ export function LotRegister({ lots, initial }: { lots: LotOverview[]; initial: L
                 </td>
                 <td className="max-w-72 px-3 py-2.5">
                   <p className="truncate">{l.address ?? "—"}</p>
-                  <p className="truncate text-xs text-muted-fg">{l.landholder_name ?? ""}</p>
+                  <p className="truncate text-xs text-muted-fg" title={l.landholder_names ?? undefined}>
+                    {l.landholder_names ?? ""}
+                  </p>
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap tabular-nums">{l.chainage ?? "—"}</td>
                 <td className="px-3 py-2.5 whitespace-nowrap">{l.assigned_engineer ?? "—"}</td>
@@ -208,7 +209,13 @@ export function LotRegister({ lots, initial }: { lots: LotOverview[]; initial: L
                   <StatusBadge options={SURVEY_STATUSES} value={l.post_survey_status} />
                 </td>
                 <td className="px-3 py-2.5 whitespace-nowrap">
-                  {l.landholder_signoff_date ? formatDate(l.landholder_signoff_date) : <span className="text-muted-fg">—</span>}
+                  {l.restorations === 0 ? (
+                    <span className="text-muted-fg">None</span>
+                  ) : l.acceptances_outstanding > 0 ? (
+                    <Badge tone="amber">{l.acceptances_outstanding} outstanding</Badge>
+                  ) : (
+                    <Badge tone="green">{l.restorations} accepted</Badge>
+                  )}
                 </td>
                 <td className="px-3 py-2.5">
                   <ProgressDots lot={l} />

@@ -137,7 +137,10 @@ create view public.lot_overview
 with (security_invoker = true)
 as
 select
-  l.*,
+  -- Explicit column list (not l.*) so later migrations can extend the view in place.
+  l.id, l.lot_number, l.address, l.landholder_id, l.chainage, l.chainage_m, l.status, l.assigned_engineer, l.notes,
+  l.landholder_signoff_date, l.landholder_signoff_name, l.landholder_signoff_notes, l.closed_at, l.closed_by,
+  l.created_at, l.created_by, l.updated_at, l.updated_by,
   h.name                               as landholder_name,
   h.phone                              as landholder_phone,
   h.email                              as landholder_email,

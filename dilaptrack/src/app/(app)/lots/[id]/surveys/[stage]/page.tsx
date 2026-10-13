@@ -6,7 +6,7 @@ import { ReportButton } from "@/components/report-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth";
 import { SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
-import { getAttachments, getLot } from "@/lib/data";
+import { getAttachments, getLot, getLotLandholders } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
 import { createClient } from "@/lib/supabase/server";
 import { SurveyForm } from "./survey-form";
@@ -33,7 +33,7 @@ export default async function SurveyPage({ params }: PageProps<"/lots/[id]/surve
     .eq("survey_type", type.value)
     .single();
   if (!survey) notFound();
-  const files = await getAttachments({ lot_id: lot.id, category: type.value });
+  const [files, links] = await Promise.all([getAttachments({ lot_id: lot.id, category: type.value }), getLotLandholders(lot.id)]);
   const locked = lot.status === "closed";
   const canEdit = session.can.editRecords && !locked;
 
@@ -90,6 +90,7 @@ export default async function SurveyPage({ params }: PageProps<"/lots/[id]/surve
             category={type.value}
             surveyId={survey.id}
             locked={locked}
+            landholders={links.map((l) => ({ id: l.landholder_id, name: l.landholder.name }))}
           />
         </CardContent>
       </Card>

@@ -30,6 +30,15 @@ export const FILE_CATEGORIES: { value: Enums<"file_category">; label: string; sl
   { value: "pre_construction", label: "Pre-Construction", slug: "pre-construction" },
   { value: "post_construction", label: "Post-Construction", slug: "post-construction" },
   { value: "closeout", label: "Closeout", slug: "closeout" },
+  { value: "reports", label: "Issued Reports", slug: "reports" },
+];
+
+export const LANDHOLDER_ROLES: Option<Enums<"landholder_role">>[] = [
+  { value: "road_authority", label: "Road authority", tone: "purple" },
+  { value: "owner", label: "Owner", tone: "blue" },
+  { value: "adjacent_resident", label: "Adjacent resident", tone: "green" },
+  { value: "occupier", label: "Occupier / tenant", tone: "amber" },
+  { value: "other", label: "Other", tone: "gray" },
 ];
 
 export const SURVEY_TYPES: { value: Enums<"survey_type">; label: string; slug: string }[] = [

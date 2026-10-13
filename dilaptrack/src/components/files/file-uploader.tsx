@@ -21,6 +21,7 @@ export function FileUploader({
   lotNumber,
   category,
   surveyId,
+  landholders = [],
   accept = DEFAULT_ACCEPT,
   label = "Drop photos, videos or documents here",
   compact = false,
@@ -29,6 +30,8 @@ export function FileUploader({
   lotNumber: string;
   category: Enums<"file_category">;
   surveyId?: string;
+  /** Landholders on the lot: lets the uploader tag files to the property they show. */
+  landholders?: { id: string; name: string }[];
   accept?: string;
   label?: string;
   compact?: boolean;
@@ -39,6 +42,7 @@ export function FileUploader({
   const cameraInput = useRef<HTMLInputElement>(null);
   const [dragging, setDragging] = useState(false);
   const [items, setItems] = useState<Item[]>([]);
+  const [landholderId, setLandholderId] = useState("");
   const busy = items.some((i) => i.state === "queued" || i.state === "uploading");
 
   const update = (key: string, patch: Partial<Item>) =>
@@ -51,7 +55,7 @@ export function FileUploader({
     }
     update(key, { state: "uploading" });
     try {
-      await uploadFile(createClient(), file, { lotId, lotNumber, category, surveyId });
+      await uploadFile(createClient(), file, { lotId, lotNumber, category, surveyId, landholderId: landholderId || null });
       update(key, { state: "done" });
       return true;
     } catch (e) {
@@ -96,6 +100,23 @@ export function FileUploader({
 
   return (
     <div className="no-print space-y-2">
+      {landholders.length > 0 && (
+        <label className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-fg">Relates to</span>
+          <select
+            value={landholderId}
+            onChange={(e) => setLandholderId(e.target.value)}
+            className="h-8 rounded-lg border border-border bg-card px-2 text-sm"
+          >
+            <option value="">Whole lot (general)</option>
+            {landholders.map((l) => (
+              <option key={l.id} value={l.id}>
+                {l.name}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <div
         onDragOver={(e) => {
           e.preventDefault();

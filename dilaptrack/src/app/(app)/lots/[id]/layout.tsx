@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, Mail, MapPin, Phone, UserRound } from "lucide-react";
+import { ChevronLeft, MapPin, Phone, UserRound } from "lucide-react";
 import { LotTabs } from "@/components/lots/lot-tabs";
 import { StatusBadge } from "@/components/ui/badge";
 import { ReportButton } from "@/components/report-button";
@@ -32,16 +32,12 @@ export default async function LotLayout({ children, params }: LayoutProps<"/lots
             {lot.landholder_id && (
               <Link href={`/landholders/${lot.landholder_id}`} className="inline-flex items-center gap-1 hover:text-fg hover:underline">
                 <UserRound className="size-3.5" /> {lot.landholder_name}
+                {lot.landholder_count > 1 && <span className="text-muted-fg">+{lot.landholder_count - 1} more</span>}
               </Link>
             )}
             {lot.landholder_phone && (
               <a href={`tel:${lot.landholder_phone.replace(/[^\d+]/g, "")}`} className="inline-flex items-center gap-1 hover:text-fg hover:underline">
                 <Phone className="size-3.5" /> {lot.landholder_phone}
-              </a>
-            )}
-            {lot.landholder_email && (
-              <a href={`mailto:${lot.landholder_email}`} className="inline-flex items-center gap-1 hover:text-fg hover:underline">
-                <Mail className="size-3.5" /> {lot.landholder_email}
               </a>
             )}
             {lot.chainage && <span>CH {lot.chainage}</span>}
@@ -51,7 +47,7 @@ export default async function LotLayout({ children, params }: LayoutProps<"/lots
           Lot report
         </ReportButton>
       </div>
-      <LotTabs lotId={lot.id} fileCount={lot.file_count} />
+      <LotTabs lotId={lot.id} fileCount={lot.file_count} reportCount={lot.issued_report_count} />
       <div className="pt-5">{children}</div>
     </>
   );
