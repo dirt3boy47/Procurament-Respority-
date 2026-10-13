@@ -5,26 +5,20 @@ export type AuditEntry = Tables<"audit_log">;
 const TABLE_NAMES: Record<string, string> = {
   lots: "lot",
   surveys: "survey",
-  defects: "defect",
-  reinstatement_items: "reinstatement item",
+  landholders: "landholder",
   attachments: "file",
   profiles: "user",
 };
 
 const FIELD_NAMES: Record<string, string> = {
   lot_number: "lot number",
-  landholder_contact: "landholder contact",
+  landholder_id: "landholder",
+  postal_address: "postal address",
   assigned_engineer: "assigned engineer",
   landholder_signoff_date: "landholder acceptance date",
   landholder_signoff_name: "accepted by (name)",
   landholder_signoff_notes: "acceptance notes",
   survey_date: "survey date",
-  assigned_to: "assigned to",
-  due_date: "due date",
-  required_works: "required works",
-  completion_date: "completion date",
-  landholder_accepted: "landholder accepted",
-  landholder_accepted_date: "acceptance date",
   closed_by: "closed by",
   full_name: "name",
 };
@@ -35,7 +29,7 @@ function get(data: Json | null, key: string): Json | undefined {
   return data && typeof data === "object" && !Array.isArray(data) ? data[key] : undefined;
 }
 
-/** A short sentence such as "updated the status of a defect". */
+/** A short sentence such as "updated the status of a lot". */
 export function describeChange(entry: AuditEntry) {
   const noun = TABLE_NAMES[entry.table_name] ?? entry.table_name;
   const data = entry.new_data ?? entry.old_data;

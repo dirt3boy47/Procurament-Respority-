@@ -1,28 +1,18 @@
 import Link from "next/link";
 import type { Metadata } from "next";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  ClipboardCheck,
-  ClipboardList,
-  FolderOpen,
-  Hammer,
-  Hourglass,
-  MapPinned,
-  Upload,
-} from "lucide-react";
+import { CalendarClock, CheckCircle2, ClipboardCheck, FolderOpen, Hourglass, MapPinned, PenLine, Upload } from "lucide-react";
 import { Badge, StatusBadge } from "@/components/ui/badge";
 import { ButtonLink } from "@/components/ui/button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { EmptyState } from "@/components/ui/empty-state";
 import { PageHeader } from "@/components/ui/page-header";
 import { StatCard } from "@/components/ui/stat-card";
-import { requireSession } from "@/lib/auth";
-import { DEFECT_PRIORITIES, LOT_STATUSES } from "@/lib/constants";
-import { listLots } from "@/lib/data";
-import { defectRef, formatDate, formatDateTime, isOverdue } from "@/lib/format";
-import { createClient } from "@/lib/supabase/server";
 import { describeChange } from "@/lib/audit";
+import { requireSession } from "@/lib/auth";
+import { LOT_STATUSES, SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
+import { listLots } from "@/lib/data";
+import { formatDate, formatDateTime, todayISO } from "@/lib/format";
+import { createClient } from "@/lib/supabase/server";
 
 export const metadata: Metadata = { title: "Dashboard" };
 
@@ -38,30 +28,28 @@ const STATUS_BAR: Record<string, string> = {
 export default async function DashboardPage() {
   const { can } = await requireSession();
   const supabase = await createClient();
-  const [lots, defectsRes, activityRes] = await Promise.all([
+  const [lots, surveysRes, activityRes] = await Promise.all([
     listLots(),
     supabase
-      .from("defects")
-      .select("id, ref, lot_id, description, priority, status, due_date, assigned_to")
-      .neq("status", "closed"),
+      .from("surveys")
+      .select("id, lot_id, survey_type, status, survey_date, surveyor")
+      .in("status", ["scheduled", "in_progress"])
+      .order("survey_date", { ascending: true, nullsFirst: false }),
     supabase.from("audit_log").select("*").order("created_at", { ascending: false }).limit(8),
   ]);
-  const openDefects = defectsRes.data ?? [];
+  const upcoming = (surveysRes.data ?? []).slice(0, 8);
   const activity = activityRes.data ?? [];
   const lotById = new Map(lots.map((l) => [l.id, l]));
+  const today = todayISO();
 
   const total = lots.length;
   const preDone = lots.filter((l) => l.pre_survey_status === "complete").length;
   const postDone = lots.filter((l) => l.post_survey_status === "complete").length;
-  const openDefectCount = lots.reduce((s, l) => s + l.open_defects, 0);
-  const openReinstatement = lots.reduce((s, l) => s + l.open_reinstatement, 0);
   const closed = lots.filter((l) => l.status === "closed").length;
   const ready = lots.filter((l) => l.ready_to_close && l.status !== "closed");
-  const overdue = openDefects.filter((d) => isOverdue(d.due_date, false));
-  const urgent = openDefects
-    .filter((d) => d.priority === "critical" || d.priority === "high" || isOverdue(d.due_date, false))
-    .sort((a, b) => (a.due_date ?? "9999").localeCompare(b.due_date ?? "9999"))
-    .slice(0, 8);
+  const awaitingAcceptance = lots.filter(
+    (l) => l.post_survey_status === "complete" && !l.landholder_signoff_date && l.status !== "closed",
+  );
 
   if (total === 0) {
     return (
@@ -73,19 +61,24 @@ export default async function DashboardPage() {
             title="No lots yet"
             action={
               can.manage && (
-                <div className="flex gap-2">
+                <div className="flex flex-wrap justify-center gap-2">
                   <ButtonLink href="/lots/import">
                     <Upload /> Import lots
                   </ButtonLink>
                   <ButtonLink href="/lots/new" variant="secondary">
                     Add a lot
                   </ButtonLink>
+                  {can.admin && (
+                    <ButtonLink href="/admin/users#demo" variant="ghost">
+                      Load demo data
+                    </ButtonLink>
+                  )}
                 </div>
               )
             }
           >
             {can.manage
-              ? "Import your lot register from Excel or CSV to get started."
+              ? "Import your lot register from Excel or CSV to get started, or load demo data to try the workflow."
               : "Lots will appear here once a project manager adds them."}
           </EmptyState>
         </Card>
@@ -97,7 +90,7 @@ export default async function DashboardPage() {
     <>
       <PageHeader title="Dashboard" description="Dilapidation survey and close-out progress across the project." />
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-4 xl:grid-cols-7">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
         <StatCard label="Total lots" value={total} icon={MapPinned} href="/lots" />
         <StatCard
           label="Pre-con surveys"
@@ -116,20 +109,11 @@ export default async function DashboardPage() {
           href="/lots?post=incomplete"
         />
         <StatCard
-          label="Open defects"
-          value={openDefectCount}
-          detail={overdue.length ? `${overdue.length} overdue` : "None overdue"}
-          icon={ClipboardList}
-          accent={openDefectCount ? "text-red-600 dark:text-red-400" : "text-emerald-600"}
-          href="/defects"
-        />
-        <StatCard
-          label="Open reinstatement"
-          value={openReinstatement}
-          detail="Items not yet complete"
-          icon={Hammer}
+          label="Awaiting acceptance"
+          value={awaitingAcceptance.length}
+          detail="Post-con done, no landholder sign-off"
+          icon={PenLine}
           accent="text-amber-600 dark:text-amber-400"
-          href="/reinstatement"
         />
         <StatCard
           label="Lots closed"
@@ -157,83 +141,82 @@ export default async function DashboardPage() {
             {LOT_STATUSES.map((s) => {
               const n = lots.filter((l) => l.status === s.value).length;
               return n ? (
-                <div
-                  key={s.value}
-                  className={STATUS_BAR[s.value]}
-                  style={{ width: `${(n / total) * 100}%` }}
-                  title={`${s.label}: ${n}`}
-                />
+                <div key={s.value} className={STATUS_BAR[s.value]} style={{ width: `${(n / total) * 100}%` }} title={`${s.label}: ${n}`} />
               ) : null;
             })}
           </div>
           <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1 text-sm">
-            {LOT_STATUSES.map((s) => {
-              const n = lots.filter((l) => l.status === s.value).length;
-              return (
-                <li key={s.value}>
-                  <Link href={`/lots?status=${s.value}`} className="inline-flex items-center gap-2 hover:underline">
-                    <span className={`size-2.5 rounded-full ${STATUS_BAR[s.value]}`} aria-hidden />
-                    {s.label} <span className="font-semibold tabular-nums">{n}</span>
-                  </Link>
-                </li>
-              );
-            })}
+            {LOT_STATUSES.map((s) => (
+              <li key={s.value}>
+                <Link href={`/lots?status=${s.value}`} className="inline-flex items-center gap-2 hover:underline">
+                  <span className={`size-2.5 rounded-full ${STATUS_BAR[s.value]}`} aria-hidden />
+                  {s.label} <span className="font-semibold tabular-nums">{lots.filter((l) => l.status === s.value).length}</span>
+                </Link>
+              </li>
+            ))}
           </ul>
         </CardContent>
       </Card>
 
       <div className="mt-5 grid grid-cols-1 items-start gap-5 lg:grid-cols-2">
-        <Card>
-          <CardHeader
-            title="Defects needing attention"
-            description="High or critical priority, or past their due date."
-            actions={
-              <ButtonLink href="/defects" variant="ghost" size="sm">
-                All defects
-              </ButtonLink>
-            }
-          />
-          {urgent.length === 0 ? (
-            <EmptyState icon={CheckCircle2} title="Nothing urgent" />
-          ) : (
-            <ul className="divide-y divide-border">
-              {urgent.map((d) => {
-                const lot = lotById.get(d.lot_id);
-                return (
-                  <li key={d.id}>
-                    <Link href={`/lots/${d.lot_id}/defects#${d.id}`} className="flex items-start gap-3 px-4 py-3 hover:bg-muted sm:px-5">
-                      <AlertTriangle className="mt-0.5 size-4 shrink-0 text-amber-500" aria-hidden />
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-sm font-medium">{d.description}</p>
-                        <p className="text-xs text-muted-fg">
-                          {defectRef(d.ref)} · Lot {lot?.lot_number ?? "?"}
-                          {d.assigned_to && ` · ${d.assigned_to}`}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 flex-col items-end gap-1">
-                        <StatusBadge options={DEFECT_PRIORITIES} value={d.priority} />
-                        {d.due_date && (
-                          <span
-                            className={
-                              isOverdue(d.due_date, false) ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-muted-fg"
-                            }
-                          >
-                            Due {formatDate(d.due_date)}
+        <div className="space-y-5">
+          <Card>
+            <CardHeader title="Upcoming surveys" description="Scheduled or in progress, soonest first." />
+            {upcoming.length === 0 ? (
+              <EmptyState icon={CalendarClock} title="No surveys scheduled" />
+            ) : (
+              <ul className="divide-y divide-border">
+                {upcoming.map((s) => {
+                  const lot = lotById.get(s.lot_id);
+                  const type = SURVEY_TYPES.find((t) => t.value === s.survey_type)!;
+                  const overdue = s.survey_date && s.survey_date < today;
+                  return (
+                    <li key={s.id}>
+                      <Link href={`/lots/${s.lot_id}/surveys/${type.slug}`} className="flex items-center gap-3 px-4 py-3 hover:bg-muted sm:px-5">
+                        <CalendarClock className="size-4 shrink-0 text-muted-fg" aria-hidden />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium">
+                            Lot {lot?.lot_number ?? "?"} · {type.label.replace(" Survey", "")}
+                          </p>
+                          <p className="truncate text-xs text-muted-fg">
+                            {[lot?.landholder_name, s.surveyor].filter(Boolean).join(" · ") || "No surveyor yet"}
+                          </p>
+                        </div>
+                        <div className="flex shrink-0 flex-col items-end gap-1">
+                          <StatusBadge options={SURVEY_STATUSES} value={s.status} />
+                          <span className={overdue ? "text-xs font-medium text-red-600 dark:text-red-400" : "text-xs text-muted-fg"}>
+                            {s.survey_date ? formatDate(s.survey_date) : "No date"}
                           </span>
-                        )}
-                      </div>
+                        </div>
+                      </Link>
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
+          {awaitingAcceptance.length > 0 && (
+            <Card>
+              <CardHeader title="Awaiting landholder acceptance" description="Post-construction survey complete." />
+              <ul className="divide-y divide-border">
+                {awaitingAcceptance.slice(0, 8).map((l) => (
+                  <li key={l.id}>
+                    <Link href={`/lots/${l.id}/closeout`} className="flex items-center justify-between gap-3 px-4 py-2.5 text-sm hover:bg-muted sm:px-5">
+                      <span className="font-medium">Lot {l.lot_number}</span>
+                      <span className="truncate text-muted-fg">{l.landholder_name ?? "No landholder"}</span>
                     </Link>
                   </li>
-                );
-              })}
-            </ul>
+                ))}
+              </ul>
+            </Card>
           )}
-        </Card>
+        </div>
 
         <div className="space-y-5">
           {ready.length > 0 && (
             <Card>
-              <CardHeader title="Ready to close" description="All close-out conditions are met." />
+              <CardHeader title="Ready to close" description="Both surveys complete and landholder acceptance recorded." />
               <ul className="flex flex-wrap gap-2 px-4 py-3 sm:px-5">
                 {ready.map((l) => (
                   <li key={l.id}>

@@ -1,6 +1,6 @@
 # DilapTrack
 
-Property dilapidation surveys, defects, reinstatement and close-out for a construction project. Built for site
+Property dilapidation surveys and close-out for a construction project, with a landholder (landowner) register. Built for site
 engineers and project teams. It runs on phones on site and on desktops in the office.
 
 **Stack:** Next.js 16 (App Router, Server Actions) · TypeScript · Tailwind CSS 4 · Supabase (Postgres, Auth,
@@ -10,16 +10,16 @@ Storage, Row Level Security) · Cloudflare Workers (via OpenNext), or Vercel.
 
 | Area | Details |
 |---|---|
-| **Dashboard** | Total lots, pre/post-construction surveys complete, open defects, open reinstatement, lots closed / outstanding, lots by status, urgent defects, lots ready to close, recent activity. |
-| **Lot register** | Lot number, address, landholder (+ contact), chainage, status, assigned engineer, notes. Search, filter (status, engineer, outstanding surveys, ready to close), sort by lot number or chainage, CSV export. Phone-friendly card view. |
-| **Lot import** | Excel (.xlsx) or CSV. Columns are auto-matched by heading (and can be changed). Every row is validated in a preview before anything is saved. Duplicates within the file are flagged. Lot numbers already in the register are skipped, never overwritten. Matching is case-insensitive, and the database enforces uniqueness. |
+| **Dashboard** | Total lots, pre/post-construction surveys complete, lots awaiting landholder acceptance, lots closed / outstanding, lots by status, upcoming surveys (overdue highlighted), lots ready to close, recent activity. |
+| **Lot register** | Lot number, address, landholder, chainage, status, assigned engineer, notes. Search, filter (status, engineer, outstanding surveys, ready to close), sort by lot number or chainage, CSV export. Phone-friendly card view. |
+| **Landholder register** | Landowners and occupiers: name, phone, email, postal address, notes, and the lots each one owns. On the lot form, choose the landholder from a searchable list, or add a new one without leaving the form. Names are unique, ignoring case and spacing. A landholder with lots can't be deleted. CSV export. |
+| **Lot import** | Excel (.xlsx) or CSV. Columns are auto-matched by heading (and can be changed). Every row is validated in a preview before anything is saved. Duplicate lots within the file are flagged, and lot numbers already in the register are skipped, never overwritten. Landholder names are matched to the register; new names are added to it with the phone or email from the file. |
 | **Surveys** | One pre-construction and one post-construction survey per lot, created automatically: date, surveyor, notes, status, photos, videos and the PDF report. |
-| **Files** | Supabase Storage, organised per lot: `LOT-001/pre-construction`, `post-construction`, `defects`, `reinstatement`, `closeout`. Drag-and-drop or "Take photo" on phones. Gallery with full-screen viewer, captions and download. Originals are kept untouched; a small JPEG preview is generated in the browser for fast galleries and PDF reports. |
-| **Defects** | Lot, description, photos, priority, status, assigned to, due date. Overdue highlighting. Project-wide register with filters and CSV export. |
-| **Reinstatement** | Required works, status, completion date, photos, landholder acceptance (+ date), notes. Project-wide register. |
-| **Close-out** | A lot can only be closed when the pre-construction survey is complete, the post-construction survey is complete, all defects are closed, all reinstatement is complete and landholder acceptance is recorded. The database enforces this as well as the UI. A closed lot's records are locked until it is reopened. |
-| **Reports (PDF)** | Individual Lot Report, Dilapidation Survey Report (photographic record), Reinstatement Report (project or lot), Project Summary Report. The server returns the report data (permission-checked); the PDF is drawn in the browser, so photo-heavy reports don't hit server CPU limits. |
-| **Audit trail** | Every insert, update and delete on lots, surveys, defects, reinstatement, files and user roles is recorded by a database trigger: who, when, and before → after for each field. History tab per lot, plus a project-wide audit log. The log can't be edited through the app or API. |
+| **Files** | Supabase Storage, organised per lot: `LOT-001/pre-construction`, `post-construction`, `closeout`. Drag-and-drop or "Take photo" on phones. Gallery with full-screen viewer, captions and download. Originals are kept untouched; a small JPEG preview is generated in the browser for fast galleries and PDF reports. |
+| **Close-out** | A lot can only be closed when the pre-construction survey is complete, the post-construction survey is complete, and landholder acceptance is recorded (name, date, notes, plus the signed form in the Closeout folder). The database enforces this as well as the UI. A closed lot's records are locked until it is reopened. |
+| **Reports (PDF)** | Project Summary, Individual Lot Report, Dilapidation Survey Report (photographic record) and Landholder Report (contact details and lot status per landholder). The server returns the report data (permission-checked); the PDF is drawn in the browser, so photo-heavy reports don't hit server CPU limits. |
+| **Demo data** | Users → Demo data → *Load demo data* (administrators) adds 8 landholders and 12 lots, DEMO-01 to DEMO-12. They cover every stage from not started to closed, with sample photos, survey reports and signed acceptance forms. *Remove demo data* deletes them again, including their files. |
+| **Audit trail** | Every insert, update and delete on lots, surveys, landholders, files and user roles is recorded by a database trigger: who, when, and before → after for each field. History tab per lot, plus a project-wide audit log. The log can't be edited through the app or API. |
 | **Other** | Dark mode (light / dark / system), responsive layout with a bottom tab bar on phones, Australian date formats. |
 
 ## Users and permissions
@@ -27,8 +27,8 @@ Storage, Row Level Security) · Cloudflare Workers (via OpenNext), or Vercel.
 | Role | Can |
 |---|---|
 | Administrator | Everything, including inviting users and changing roles. |
-| Project Manager | View and manage all records: lot register, import, landholder acceptance, close/reopen lots, delete records. |
-| Site Engineer | View everything; fill in surveys; upload photos, videos and documents; create and update defects and reinstatement items; delete their own uploads. |
+| Project Manager | View and manage all records: lot register, import, landholder acceptance, close/reopen lots, delete lots and landholders. |
+| Site Engineer | View everything; fill in surveys; upload photos, videos and documents; add and update landholders; delete their own uploads. |
 | Read Only | View records and download reports. |
 
 The same rules are enforced by Row Level Security in Postgres and Storage policies, so the UI is not the only line
@@ -47,17 +47,18 @@ of defence. Other safeguards:
 dilaptrack/
 ├── supabase/
 │   ├── migrations/…_dilaptrack_init.sql   Schema, RLS, triggers (audit, close-out, lot import), storage bucket + policies
+│   ├── migrations/…_dilap_focus.sql       Removes defects/reinstatement; adds the landholder register
 │   ├── templates/                          Invite / password-reset / magic-link emails
-│   ├── seed.sql                            Demo lots for local development
+│   ├── seed.sql                            A few lots for local development
 │   └── config.toml                         Local Supabase settings
 ├── src/
 │   ├── middleware.ts                       Refreshes the session, sends signed-out users to /login
-│   ├── actions/                            Server Actions (lots, records, users, auth) — all permission-checked
+│   ├── actions/                            Server Actions (lots, landholders, records, users, demo, auth) — all permission-checked
 │   ├── app/
-│   │   ├── (app)/                          Signed-in pages: dashboard, lots/[id]/…, defects, reinstatement, reports, audit, admin/users
-│   │   ├── api/reports/[type]/route.ts     Report data as JSON (lot | survey | reinstatement | summary)
+│   │   ├── (app)/                          Signed-in pages: dashboard, lots/[id]/…, landholders, reports, audit, admin/users
+│   │   ├── api/reports/[type]/route.ts     Report data as JSON (summary | lot | survey | landholder)
 │   │   ├── login, forgot-password, auth/confirm, pending
-│   ├── components/                         UI kit, app shell, file uploader/gallery, lot & record components
+│   ├── components/                         UI kit, app shell, file uploader/gallery, lot & landholder components
 │   ├── lib/                                Supabase clients, auth/permissions, import parsing, close-out rules, formatting
 │   └── reports/                            react-pdf report documents, drawn in the browser (render.tsx)
 └── tests/
@@ -69,9 +70,10 @@ dilaptrack/
 
 1. **Create a project** at [supabase.com](https://supabase.com). Choose a region close to the team
    (e.g. Sydney).
-2. **Apply the database migration.** Either:
+2. **Apply the database migrations** (all files in `supabase/migrations`, in name order). Either:
    * with the CLI: `npx supabase login && npx supabase link --project-ref <ref> && npx supabase db push`, or
-   * paste `supabase/migrations/20261013000000_dilaptrack_init.sql` into **SQL Editor** and run it.
+   * paste each file into **SQL Editor** and run it, oldest first: `20261013000000_dilaptrack_init.sql`, then
+     `20261014000000_dilap_focus.sql`.
 
    This creates the tables, policies, triggers and the private `lot-files` storage bucket.
 3. **Authentication settings** (Dashboard → Authentication):

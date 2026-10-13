@@ -4,12 +4,16 @@ import { PGlite, type Transaction } from "@electric-sql/pglite";
 
 const root = join(__dirname, "..", "..");
 
-/** A fresh database with the Supabase stand-ins and every migration applied. */
-export async function createDb() {
+/**
+ * A fresh database with the Supabase stand-ins and every migration applied.
+ * `before` runs a callback just before the named migration file (to test upgrades).
+ */
+export async function createDb(before: Record<string, (db: PGlite) => Promise<void>> = {}) {
   const db = new PGlite({ parsers: { 20: Number, 1700: Number, 1082: (x: string) => x } });
   await db.exec(readFileSync(join(__dirname, "supabase-stub.sql"), "utf8"));
   const dir = join(root, "supabase", "migrations");
   for (const file of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
+    await before[file]?.(db);
     await db.exec(readFileSync(join(dir, file), "utf8"));
   }
   return db;

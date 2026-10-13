@@ -2,7 +2,7 @@
 // react-pdf is only downloaded when someone asks for a report.
 import { pdf } from "@react-pdf/renderer";
 import type { PdfPhoto } from "./kit";
-import { LotReport, ReinstatementReport, SummaryReport, SurveyReport } from "./reports";
+import { LandholderReport, LotReport, SummaryReport, SurveyReport } from "./reports";
 import type { ReportData } from "./types";
 
 /** Download photos up front (6 at a time). Photos that fail to load are left out. */
@@ -42,8 +42,8 @@ export async function renderReport(data: ReportData): Promise<Blob> {
         doc = <SurveyReport {...data} stages={stages} />;
         break;
       }
-      case "reinstatement":
-        doc = <ReinstatementReport {...data} photos={data.photos && (await localise(data.photos, objectUrls))} />;
+      case "landholder":
+        doc = <LandholderReport {...data} />;
         break;
       case "summary":
         doc = <SummaryReport {...data} />;

@@ -1,7 +1,9 @@
 import type { Metadata } from "next";
+import { DemoData } from "@/components/demo-data";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireCapability } from "@/lib/auth";
+import { DEMO_PREFIX } from "@/lib/demo";
 import { hasAdminKey } from "@/lib/supabase/admin";
 import { createClient } from "@/lib/supabase/server";
 import { InviteForm, UserRow } from "./user-forms";
@@ -11,14 +13,17 @@ export const metadata: Metadata = { title: "Users" };
 const ROLE_HELP = [
   ["Administrator", "Everything, including managing users."],
   ["Project Manager", "View and manage all records: lot register, import, landholder acceptance, close-out, deletions."],
-  ["Site Engineer", "Fill in surveys, upload photos and documents, record and update defects and reinstatement."],
+  ["Site Engineer", "Fill in surveys, upload photos and documents, add and update landholder details."],
   ["Read Only", "View everything and download reports."],
 ];
 
 export default async function UsersPage() {
   const { profile: me } = await requireCapability("admin");
   const supabase = await createClient();
-  const { data } = await supabase.from("profiles").select("*").order("active").order("full_name");
+  const [{ data }, { count: demoLots }] = await Promise.all([
+    supabase.from("profiles").select("*").order("active").order("full_name"),
+    supabase.from("lots").select("id", { count: "exact", head: true }).like("lot_number", `${DEMO_PREFIX}%`),
+  ]);
   const users = data ?? [];
   const pending = users.filter((u) => !u.active).length;
 
@@ -49,6 +54,12 @@ export default async function UsersPage() {
                   Meanwhile, invite people from Supabase → Authentication → Users, then give them access on this page.
                 </p>
               )}
+            </CardContent>
+          </Card>
+          <Card id="demo" className="scroll-mt-20">
+            <CardHeader title="Demo data" description="Try the workflow and reports with realistic test data." />
+            <CardContent>
+              <DemoData loaded={Boolean(demoLots)} />
             </CardContent>
           </Card>
           <Card>

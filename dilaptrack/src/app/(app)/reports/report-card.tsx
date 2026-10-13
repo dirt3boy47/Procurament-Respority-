@@ -3,7 +3,7 @@
 import { useState, type ReactNode } from "react";
 import { ReportButton } from "@/components/report-button";
 import { Card, CardContent } from "@/components/ui/card";
-import { Checkbox, Field, Select } from "@/components/ui/input";
+import { Field, Select } from "@/components/ui/input";
 
 export function ReportCard({
   type,
@@ -14,9 +14,10 @@ export function ReportCard({
   needsLot,
   optionalLot,
   stages,
-  outstandingFilter,
+  lotLabel = "Lot",
+  lotParam = "lot",
 }: {
-  type: "lot" | "survey" | "reinstatement" | "summary";
+  type: "lot" | "survey" | "landholder" | "summary";
   icon: ReactNode;
   title: string;
   description: string;
@@ -24,16 +25,15 @@ export function ReportCard({
   needsLot?: boolean;
   optionalLot?: boolean;
   stages?: boolean;
-  outstandingFilter?: boolean;
+  lotLabel?: string;
+  lotParam?: string;
 }) {
   const [lot, setLot] = useState("");
   const [stage, setStage] = useState("");
-  const [outstanding, setOutstanding] = useState(false);
 
   const params: Record<string, string> = {};
-  if (lot) params.lot = lot;
+  if (lot) params[lotParam] = lot;
   if (stage) params.stage = stage;
-  if (outstanding) params.status = "outstanding";
   const disabled = needsLot && !lot;
 
   return (
@@ -49,9 +49,9 @@ export function ReportCard({
           </div>
         </div>
         {(needsLot || optionalLot) && (
-          <Field label="Lot" htmlFor={`${type}-lot`}>
+          <Field label={lotLabel} htmlFor={`${type}-lot`}>
             <Select id={`${type}-lot`} value={lot} onChange={(e) => setLot(e.target.value)}>
-              <option value="">{needsLot ? "Choose a lot…" : "All lots"}</option>
+              <option value="">{needsLot ? `Choose a ${lotLabel.toLowerCase()}…` : `All ${lotLabel.toLowerCase()}s`}</option>
               {lots.map((l) => (
                 <option key={l.id} value={l.id}>
                   {l.label}
@@ -68,9 +68,6 @@ export function ReportCard({
               <option value="post_construction">Post-construction only</option>
             </Select>
           </Field>
-        )}
-        {outstandingFilter && (
-          <Checkbox checked={outstanding} onChange={(e) => setOutstanding(e.target.checked)} label="Outstanding items only" />
         )}
         <div className="mt-auto flex flex-wrap gap-2">
           <ReportButton type={type} params={params} variant="primary" disabled={disabled}>

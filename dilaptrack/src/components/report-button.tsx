@@ -22,7 +22,7 @@ export function ReportButton({
   className,
   children,
 }: {
-  type: "lot" | "survey" | "reinstatement" | "summary";
+  type: "lot" | "survey" | "landholder" | "summary";
   params?: Record<string, string>;
   mode?: "open" | "download";
   variant?: Variant;

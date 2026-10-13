@@ -1,4 +1,5 @@
 import Link from "next/link";
+import type { ReactNode } from "react";
 import { Trash2 } from "lucide-react";
 import { deleteLot } from "@/actions/lots";
 import { EditLotButton } from "@/components/lots/edit-lot";
@@ -6,7 +7,7 @@ import { closeoutChecklist, StepIcon } from "@/components/lots/progress";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { ConfirmButton } from "@/components/ui/confirm-button";
 import { requireSession } from "@/lib/auth";
-import { getLot, teamNames } from "@/lib/data";
+import { getLot, listLandholders, teamNames } from "@/lib/data";
 import { formatDate, formatDateTime } from "@/lib/format";
 
 export async function generateMetadata({ params }: PageProps<"/lots/[id]">) {
@@ -20,15 +21,28 @@ export default async function LotOverviewPage({ params }: PageProps<"/lots/[id]"
   const checklist = closeoutChecklist(lot);
   const done = checklist.filter((c) => c.done).length;
 
-  const details: [string, string | null][] = [
+  const details: [string, ReactNode][] = [
     ["Lot number", lot.lot_number],
     ["Property address", lot.address],
-    ["Landholder", lot.landholder],
-    ["Landholder contact", lot.landholder_contact],
+    [
+      "Landholder",
+      lot.landholder_id ? (
+        <Link href={`/landholders/${lot.landholder_id}`} className="text-primary hover:underline">
+          {lot.landholder_name}
+        </Link>
+      ) : null,
+    ],
+    ["Landholder phone / email", [lot.landholder_phone, lot.landholder_email].filter(Boolean).join(" · ") || null],
     ["Chainage", lot.chainage],
     ["Assigned engineer", lot.assigned_engineer],
-    ["Pre-construction survey", lot.pre_survey_date ? formatDate(lot.pre_survey_date) : null],
-    ["Post-construction survey", lot.post_survey_date ? formatDate(lot.post_survey_date) : null],
+    [
+      "Pre-construction survey",
+      lot.pre_survey_date ? `${formatDate(lot.pre_survey_date)}${lot.pre_surveyor ? ` · ${lot.pre_surveyor}` : ""}` : null,
+    ],
+    [
+      "Post-construction survey",
+      lot.post_survey_date ? `${formatDate(lot.post_survey_date)}${lot.post_surveyor ? ` · ${lot.post_surveyor}` : ""}` : null,
+    ],
   ];
 
   return (
@@ -36,7 +50,15 @@ export default async function LotOverviewPage({ params }: PageProps<"/lots/[id]"
       <Card className="lg:col-span-3">
         <CardHeader
           title="Lot details"
-          actions={can.manage && <EditLotButton lot={lot} engineers={await teamNames()} />}
+          actions={
+            can.manage && (
+              <EditLotButton
+                lot={lot}
+                engineers={await teamNames()}
+                landholders={(await listLandholders()).map((l) => ({ id: l.id, name: l.name, phone: l.phone }))}
+              />
+            )
+          }
         />
         <CardContent>
           <dl className="grid gap-x-6 gap-y-4 sm:grid-cols-2">
@@ -79,7 +101,7 @@ export default async function LotOverviewPage({ params }: PageProps<"/lots/[id]"
         <Card className="border-red-200 lg:col-span-5 dark:border-red-900">
           <CardHeader
             title="Delete lot"
-            description="Permanently removes this lot with its surveys, defects, reinstatement items and files. The audit log keeps a record."
+            description="Permanently removes this lot with its surveys and files. The landholder stays in the register. The audit log keeps a record."
             actions={
               <ConfirmButton
                 variant="danger"

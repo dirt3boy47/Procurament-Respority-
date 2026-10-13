@@ -24,7 +24,7 @@ import {
 import { cn } from "@/lib/utils";
 
 type Sheet = { fileName: string; headers: string[]; body: unknown[][]; headerRowNumber: number };
-type Result = { inserted: number; skipped: string[] };
+type Result = { inserted: number; newLandholders: number; skipped: string[] };
 
 async function readTable(file: File): Promise<unknown[][]> {
   const name = file.name.toLowerCase();
@@ -103,7 +103,7 @@ export function LotImporter({ existingLotNumbers }: { existingLotNumbers: string
       const res = await importLots(rowsToImport(rows));
       if (!res.ok) return void toast.error(res.error);
       toast.success(res.message);
-      setResult({ inserted: res.inserted ?? 0, skipped: res.skipped ?? [] });
+      setResult({ inserted: res.inserted ?? 0, newLandholders: res.newLandholders ?? 0, skipped: res.skipped ?? [] });
     });
   }
 
@@ -115,6 +115,11 @@ export function LotImporter({ existingLotNumbers }: { existingLotNumbers: string
           <p className="text-lg font-semibold">
             {result.inserted} lot{result.inserted === 1 ? "" : "s"} imported
           </p>
+          {result.newLandholders > 0 && (
+            <p className="text-sm text-muted-fg">
+              {result.newLandholders} new landholder{result.newLandholders === 1 ? " was" : "s were"} added to the landholder register.
+            </p>
+          )}
           {result.skipped.length > 0 && (
             <p className="max-w-lg text-sm text-muted-fg">
               Skipped because they already exist: {result.skipped.join(", ")}
@@ -177,7 +182,8 @@ export function LotImporter({ existingLotNumbers }: { existingLotNumbers: string
             <p className="max-w-xl text-xs text-muted-fg">
               The first row should hold column headings. Recognised columns:{" "}
               {IMPORT_FIELDS.map((f) => f.label).join(", ")}. Only Lot Number is required. Lot numbers already in
-              the register are skipped, never overwritten.
+              the register are skipped, never overwritten. Landholders are matched to the landholder register by name;
+              new names are added to it (with the contact, if given).
             </p>
           </div>
         </CardContent>

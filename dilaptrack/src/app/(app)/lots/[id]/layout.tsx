@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { ChevronLeft, MapPin, Phone, UserRound } from "lucide-react";
+import { ChevronLeft, Mail, MapPin, Phone, UserRound } from "lucide-react";
 import { LotTabs } from "@/components/lots/lot-tabs";
 import { StatusBadge } from "@/components/ui/badge";
 import { ReportButton } from "@/components/report-button";
@@ -29,22 +29,20 @@ export default async function LotLayout({ children, params }: LayoutProps<"/lots
                 <MapPin className="size-3.5" /> {lot.address}
               </span>
             )}
-            {lot.landholder && (
-              <span className="inline-flex items-center gap-1">
-                <UserRound className="size-3.5" /> {lot.landholder}
-              </span>
+            {lot.landholder_id && (
+              <Link href={`/landholders/${lot.landholder_id}`} className="inline-flex items-center gap-1 hover:text-fg hover:underline">
+                <UserRound className="size-3.5" /> {lot.landholder_name}
+              </Link>
             )}
-            {lot.landholder_contact && (
-              <span className="inline-flex items-center gap-1">
-                <Phone className="size-3.5" />
-                {/^[+\d][\d\s()-]{6,}$/.test(lot.landholder_contact) ? (
-                  <a href={`tel:${lot.landholder_contact.replace(/[^\d+]/g, "")}`} className="hover:underline">
-                    {lot.landholder_contact}
-                  </a>
-                ) : (
-                  lot.landholder_contact
-                )}
-              </span>
+            {lot.landholder_phone && (
+              <a href={`tel:${lot.landholder_phone.replace(/[^\d+]/g, "")}`} className="inline-flex items-center gap-1 hover:text-fg hover:underline">
+                <Phone className="size-3.5" /> {lot.landholder_phone}
+              </a>
+            )}
+            {lot.landholder_email && (
+              <a href={`mailto:${lot.landholder_email}`} className="inline-flex items-center gap-1 hover:text-fg hover:underline">
+                <Mail className="size-3.5" /> {lot.landholder_email}
+              </a>
             )}
             {lot.chainage && <span>CH {lot.chainage}</span>}
           </div>
@@ -53,7 +51,7 @@ export default async function LotLayout({ children, params }: LayoutProps<"/lots
           Lot report
         </ReportButton>
       </div>
-      <LotTabs lotId={lot.id} openDefects={lot.open_defects} openReinstatement={lot.open_reinstatement} />
+      <LotTabs lotId={lot.id} fileCount={lot.file_count} />
       <div className="pt-5">{children}</div>
     </>
   );

@@ -7,7 +7,7 @@ type Supabase = Awaited<ReturnType<typeof createClient>>;
 /** Storage paths (originals and previews) for attachments matching a column. */
 export async function attachmentPaths(
   supabase: Supabase,
-  column: "lot_id" | "defect_id" | "reinstatement_id" | "id",
+  column: "lot_id" | "id",
   value: string,
 ) {
   const { data } = await supabase.from("attachments").select("storage_path, preview_path").eq(column, value);

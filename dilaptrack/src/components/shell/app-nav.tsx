@@ -40,7 +40,7 @@ export function MobileTabBar({ can }: { can: Capabilities }) {
       aria-label="Main"
       className="no-print fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/95 pb-[env(safe-area-inset-bottom)] backdrop-blur lg:hidden"
     >
-      <ul className="grid grid-cols-5">
+      <ul className="grid grid-cols-4">
         {navItems(can)
           .filter((i) => i.mobile)
           .map(({ href, short, icon: Icon }) => {

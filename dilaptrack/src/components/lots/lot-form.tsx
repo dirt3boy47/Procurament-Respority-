@@ -2,6 +2,7 @@
 
 import { ActionForm } from "@/components/ui/action-form";
 import { Button } from "@/components/ui/button";
+import { LandholderPicker, type LandholderOption } from "@/components/landholders/landholder-picker";
 import { Field, Input, Select, Textarea } from "@/components/ui/input";
 import type { ActionResult } from "@/lib/action-result";
 import { LOT_STATUSES } from "@/lib/constants";
@@ -10,7 +11,7 @@ import type { Tables } from "@/lib/database.types";
 type LotValues = Partial<
   Pick<
     Tables<"lots">,
-    "lot_number" | "address" | "landholder" | "landholder_contact" | "chainage" | "status" | "assigned_engineer" | "notes"
+    "lot_number" | "address" | "landholder_id" | "chainage" | "status" | "assigned_engineer" | "notes"
   >
 >;
 
@@ -18,12 +19,16 @@ export function LotForm({
   action,
   lot = {},
   engineers,
+  landholders,
+  canAddLandholder,
   submitLabel,
   onSuccess,
 }: {
   action: (formData: FormData) => Promise<ActionResult>;
   lot?: LotValues;
   engineers: string[];
+  landholders: LandholderOption[];
+  canAddLandholder: boolean;
   submitLabel: string;
   onSuccess?: (result: ActionResult) => void;
 }) {
@@ -42,11 +47,8 @@ export function LotForm({
             <Field label="Property address" htmlFor="address" className="sm:col-span-2">
               <Input id="address" name="address" defaultValue={lot.address ?? ""} maxLength={300} autoComplete="off" />
             </Field>
-            <Field label="Landholder" htmlFor="landholder">
-              <Input id="landholder" name="landholder" defaultValue={lot.landholder ?? ""} maxLength={200} />
-            </Field>
-            <Field label="Landholder contact" htmlFor="landholder_contact" hint="Phone or email">
-              <Input id="landholder_contact" name="landholder_contact" defaultValue={lot.landholder_contact ?? ""} maxLength={200} />
+            <Field label="Landholder" htmlFor="landholder" className="sm:col-span-2" hint="From the landholder register. Search, or add a new one.">
+              <LandholderPicker options={landholders} defaultId={lot.landholder_id} canAdd={canAddLandholder} />
             </Field>
             <Field label="Assigned engineer" htmlFor="assigned_engineer">
               <Input

@@ -67,11 +67,6 @@ export default async function LotFilesPage({ params, searchParams }: PageProps<"
             surveyId={surveyId}
             locked={lot.status === "closed"}
           />
-          {(current.value === "defects" || current.value === "reinstatement") && (
-            <p className="mt-4 text-xs text-muted-fg">
-              Photos added on the {current.label} tab are linked to their item and also appear here.
-            </p>
-          )}
         </CardContent>
       </Card>
     </div>

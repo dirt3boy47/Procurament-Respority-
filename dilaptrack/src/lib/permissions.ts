@@ -11,7 +11,7 @@ export function capabilities(role: Role | null | undefined) {
   const edit = manage || role === "site_engineer";
   return {
     view: Boolean(role),
-    /** Surveys, defects, reinstatement items, uploads. */
+    /** Surveys, uploads, landholder details. */
     editRecords: edit,
     /** Lot register, import, landholder sign-off, close-out, deletes. */
     manage,

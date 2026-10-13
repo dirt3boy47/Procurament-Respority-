@@ -5,46 +5,22 @@ import { useRouter } from "next/navigation";
 import { useId, useRef, useState, type DragEvent } from "react";
 import { toast } from "sonner";
 import type { Enums } from "@/lib/database.types";
-import { STORAGE_BUCKET } from "@/lib/env";
 import { formatBytes } from "@/lib/format";
-import { buildStoragePath, previewPathFor } from "@/lib/storage";
 import { createClient } from "@/lib/supabase/client";
+import { uploadFile } from "@/lib/upload";
 import { cn } from "@/lib/utils";
 
 const MAX_MB = Number(process.env.NEXT_PUBLIC_MAX_UPLOAD_MB ?? 50);
 const DEFAULT_ACCEPT = "image/*,video/*,application/pdf,.doc,.docx,.xls,.xlsx,.csv,.txt";
-const PREVIEWABLE = /^image\/(jpeg|png|webp|gif|bmp|avif)$/;
 const CONCURRENCY = 3;
 
 type Item = { key: string; name: string; size: number; state: "queued" | "uploading" | "done" | "error"; error?: string };
-
-/** Shrink a photo to a JPEG preview for galleries and PDF reports. The original is kept untouched. */
-async function makePreview(file: File, maxSize = 1280): Promise<Blob | null> {
-  try {
-    const bitmap = await createImageBitmap(file, { imageOrientation: "from-image" });
-    const scale = Math.min(1, maxSize / Math.max(bitmap.width, bitmap.height));
-    const canvas = document.createElement("canvas");
-    canvas.width = Math.round(bitmap.width * scale);
-    canvas.height = Math.round(bitmap.height * scale);
-    const ctx = canvas.getContext("2d");
-    if (!ctx) return null;
-    ctx.fillStyle = "#fff";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-    bitmap.close();
-    return await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.8));
-  } catch {
-    return null;
-  }
-}
 
 export function FileUploader({
   lotId,
   lotNumber,
   category,
   surveyId,
-  defectId,
-  reinstatementId,
   accept = DEFAULT_ACCEPT,
   label = "Drop photos, videos or documents here",
   compact = false,
@@ -53,8 +29,6 @@ export function FileUploader({
   lotNumber: string;
   category: Enums<"file_category">;
   surveyId?: string;
-  defectId?: string;
-  reinstatementId?: string;
   accept?: string;
   label?: string;
   compact?: boolean;
@@ -76,59 +50,12 @@ export function FileUploader({
       return false;
     }
     update(key, { state: "uploading" });
-    const supabase = createClient();
-    const bucket = supabase.storage.from(STORAGE_BUCKET);
-    const path = buildStoragePath(lotNumber, category, file.name);
-    const uploaded: string[] = [];
     try {
-      const { error } = await bucket.upload(path, file, {
-        contentType: file.type || "application/octet-stream",
-        upsert: false,
-      });
-      if (error) throw error;
-      uploaded.push(path);
-
-      let previewPath: string | null = null;
-      if (PREVIEWABLE.test(file.type)) {
-        const preview = await makePreview(file);
-        if (preview) {
-          const { error: previewError } = await bucket.upload(previewPathFor(path), preview, {
-            contentType: "image/jpeg",
-            upsert: false,
-          });
-          if (!previewError) {
-            previewPath = previewPathFor(path);
-            uploaded.push(previewPath);
-          }
-        }
-      }
-
-      const { error: rowError } = await supabase.from("attachments").insert({
-        lot_id: lotId,
-        category,
-        survey_id: surveyId ?? null,
-        defect_id: defectId ?? null,
-        reinstatement_id: reinstatementId ?? null,
-        storage_path: path,
-        preview_path: previewPath,
-        file_name: file.name,
-        mime_type: file.type || null,
-        size_bytes: file.size,
-      });
-      if (rowError) throw rowError;
+      await uploadFile(createClient(), file, { lotId, lotNumber, category, surveyId });
       update(key, { state: "done" });
       return true;
     } catch (e) {
-      if (uploaded.length) await bucket.remove(uploaded);
-      const message = (e as { message?: string }).message ?? "Upload failed";
-      update(key, {
-        state: "error",
-        error: /row-level security|not authorized|unauthorized/i.test(message)
-          ? "You don't have permission to upload here"
-          : /closed/i.test(message)
-            ? "This lot is closed"
-            : message,
-      });
+      update(key, { state: "error", error: (e as Error).message });
       return false;
     }
   }

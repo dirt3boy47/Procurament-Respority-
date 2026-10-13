@@ -16,7 +16,7 @@ export const IMPORT_FIELDS: { key: ImportField; label: string; required?: boolea
   { key: "lot_number", label: "Lot Number", required: true, aliases: ["lot", "lotno", "lotnumber", "lotid", "lotref", "property", "propertyid", "propertyno"] },
   { key: "address", label: "Property Address", aliases: ["address", "propertyaddress", "streetaddress", "location", "siteaddress"] },
   { key: "landholder", label: "Landholder", aliases: ["landholder", "landowner", "owner", "ownername", "landholdername", "occupier", "resident"] },
-  { key: "landholder_contact", label: "Landholder Contact", aliases: ["contact", "phone", "mobile", "email", "landholdercontact", "contactdetails", "ownercontact"] },
+  { key: "landholder_contact", label: "Landholder Phone/Email", aliases: ["contact", "phone", "mobile", "email", "landholdercontact", "contactdetails", "ownercontact"] },
   { key: "chainage", label: "Chainage", aliases: ["chainage", "ch", "chainagem", "kp", "chainagefrom", "startchainage"] },
   { key: "status", label: "Status", aliases: ["status", "lotstatus"] },
   { key: "assigned_engineer", label: "Assigned Engineer", aliases: ["engineer", "assignedengineer", "siteengineer", "assignedto", "responsible"] },

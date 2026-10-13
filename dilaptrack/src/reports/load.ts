@@ -2,7 +2,7 @@ import "server-only";
 import type { Profile } from "@/lib/auth";
 import { closeoutChecklist } from "@/lib/closeout";
 import { FILE_CATEGORIES } from "@/lib/constants";
-import { compareLotNumbers, type LotOverview } from "@/lib/data";
+import { compareLotNumbers } from "@/lib/data";
 import type { Enums, Tables } from "@/lib/database.types";
 import { STORAGE_BUCKET } from "@/lib/env";
 import { formatDate } from "@/lib/format";
@@ -58,10 +58,8 @@ export async function loadReport(type: string, params: URLSearchParams, profile:
   if (type === "lot") {
     const lot = await getLot(supabase, params.get("lot"));
     if (!lot) return { error: "Lot not found", status: 404 };
-    const [surveys, defects, reinstatement, attachments] = await Promise.all([
+    const [surveys, attachments] = await Promise.all([
       supabase.from("surveys").select("*").eq("lot_id", lot.id).order("survey_type"),
-      supabase.from("defects").select("*").eq("lot_id", lot.id).order("ref"),
-      supabase.from("reinstatement_items").select("*").eq("lot_id", lot.id).order("ref"),
       supabase.from("attachments").select("*").eq("lot_id", lot.id).order("created_at"),
     ]);
     const files = attachments.data ?? [];
@@ -79,8 +77,6 @@ export async function loadReport(type: string, params: URLSearchParams, profile:
         lot,
         checklist: closeoutChecklist(lot),
         surveys: (surveys.data ?? []).map((s) => ({ ...s, fileCount: files.filter((f) => f.category === s.survey_type).length })),
-        defects: defects.data ?? [],
-        reinstatement: reinstatement.data ?? [],
         photos,
       },
     };
@@ -114,40 +110,25 @@ export async function loadReport(type: string, params: URLSearchParams, profile:
     };
   }
 
-  if (type === "reinstatement") {
-    const lotId = params.get("lot");
-    let query = supabase.from("reinstatement_items").select("*").order("ref");
-    if (lotId) query = query.eq("lot_id", lotId);
-    if (params.get("status") === "outstanding") query = query.neq("status", "complete");
-    const [{ data: items }, { data: lots }] = await Promise.all([query, supabase.from("lot_overview").select("*")]);
-    const byLot = new Map<string, LotOverview>((lots ?? []).map((l) => [l.id, l]));
-    const groups = [...new Set((items ?? []).map((i) => i.lot_id))]
-      .flatMap((id) => {
-        const lot = byLot.get(id);
-        return lot ? [{ lot, items: (items ?? []).filter((i) => i.lot_id === id) }] : [];
-      })
-      .sort((a, b) => compareLotNumbers(a.lot.lot_number, b.lot.lot_number));
-    let photos: PdfPhoto[] | undefined;
-    if (lotId) {
-      const { data: files } = await supabase
-        .from("attachments")
-        .select("*")
-        .eq("lot_id", lotId)
-        .eq("category", "reinstatement")
-        .order("created_at");
-      photos = await photoRefs(supabase, files ?? [], 60);
-    }
-    const lotPart = lotId && groups[0] ? `Lot-${slugify(groups[0].lot.lot_number)}-` : "";
-    return { data: { type: "reinstatement", fileName: `${lotPart}reinstatement-report-${stamp()}.pdf`, meta, groups, photos } };
+  if (type === "landholder") {
+    const landholderId = params.get("landholder");
+    let query = supabase.from("landholders").select("*").order("name");
+    if (landholderId) query = query.eq("id", landholderId);
+    const [{ data: landholders }, { data: lots }] = await Promise.all([query, supabase.from("lot_overview").select("*")]);
+    const sorted = (lots ?? []).sort((a, b) => compareLotNumbers(a.lot_number, b.lot_number));
+    const groups = (landholders ?? []).map((landholder) => ({
+      landholder,
+      lots: sorted.filter((l) => l.landholder_id === landholder.id),
+    }));
+    if (landholderId && groups.length === 0) return { error: "Landholder not found", status: 404 };
+    const part = landholderId ? `${slugify(groups[0].landholder.name)}-` : "";
+    return { data: { type: "landholder", fileName: `${part}landholder-report-${stamp()}.pdf`, meta, groups } };
   }
 
   if (type === "summary") {
-    const [{ data: lots }, { data: defects }] = await Promise.all([
-      supabase.from("lot_overview").select("*"),
-      supabase.from("defects").select("*").neq("status", "closed").order("ref"),
-    ]);
+    const { data: lots } = await supabase.from("lot_overview").select("*");
     const sorted = (lots ?? []).sort((a, b) => compareLotNumbers(a.lot_number, b.lot_number));
-    return { data: { type: "summary", fileName: `project-summary-${stamp()}.pdf`, meta, lots: sorted, openDefects: defects ?? [] } };
+    return { data: { type: "summary", fileName: `project-summary-${stamp()}.pdf`, meta, lots: sorted } };
   }
 
   return { error: "Unknown report", status: 404 };

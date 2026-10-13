@@ -102,7 +102,7 @@ export default async function CloseoutPage({ params }: PageProps<"/lots/[id]/clo
                 )}
               </div>
             ) : manage && !closed ? (
-              <SignoffForm lotId={lot.id} landholder={lot.landholder ?? ""} />
+              <SignoffForm lotId={lot.id} landholder={lot.landholder_name ?? ""} />
             ) : (
               <p className="text-sm text-muted-fg">
                 Not recorded yet. {session.can.editRecords && "Upload the signed acceptance form below and ask a project manager to record it."}

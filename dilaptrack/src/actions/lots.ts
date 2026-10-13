@@ -11,13 +11,16 @@ import { createClient } from "@/lib/supabase/server";
 import { firstIssue, formFields, optionalDate, requiredText, text, uuid } from "@/lib/validation";
 import { attachmentPaths, removeFiles } from "./files-cleanup";
 
-const LOT_FIELDS = ["lot_number", "address", "landholder", "landholder_contact", "chainage", "status", "assigned_engineer", "notes"] as const;
+const LOT_FIELDS = ["lot_number", "address", "landholder_id", "chainage", "status", "assigned_engineer", "notes"] as const;
 
 const lotSchema = z.object({
   lot_number: requiredText("Lot number", 50),
   address: text(300),
-  landholder: text(200),
-  landholder_contact: text(200),
+  landholder_id: z
+    .string()
+    .trim()
+    .refine((v) => v === "" || uuid.safeParse(v).success, "Choose a landholder from the list")
+    .transform((v) => (v === "" ? null : v)),
   chainage: text(50),
   status: z.enum(["not_started", "in_progress", "on_hold"], { message: "Choose a status" }),
   assigned_engineer: text(100),
@@ -82,7 +85,9 @@ const importRowSchema = z.object({
   notes: z.string().max(5000),
 });
 
-export async function importLots(rows: ImportLot[]): Promise<ActionResult & { inserted?: number; skipped?: string[] }> {
+export async function importLots(
+  rows: ImportLot[],
+): Promise<ActionResult & { inserted?: number; newLandholders?: number; skipped?: string[] }> {
   const session = await actionSession("manage");
   if ("error" in session) return fail(session.error);
   const parsed = z.array(importRowSchema).min(1, "There are no rows to import").max(MAX_IMPORT_ROWS).safeParse(rows);
@@ -91,11 +96,12 @@ export async function importLots(rows: ImportLot[]): Promise<ActionResult & { in
   const supabase = await createClient();
   const { data, error } = await supabase.rpc("import_lots", { p_rows: parsed.data });
   if (error) return dbError(error);
-  const result = data as { inserted: number; skipped: string[] };
+  const result = data as { inserted: number; new_landholders: number; skipped: string[] };
   revalidatePath("/", "layout");
   return {
     ...ok(`Imported ${result.inserted} lot${result.inserted === 1 ? "" : "s"}`),
     inserted: result.inserted,
+    newLandholders: result.new_landholders,
     skipped: result.skipped,
   };
 }

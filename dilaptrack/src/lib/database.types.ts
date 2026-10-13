@@ -8,17 +8,13 @@ type AppRole = "admin" | "project_manager" | "site_engineer" | "read_only";
 type LotStatus = "not_started" | "in_progress" | "on_hold" | "closed";
 type SurveyType = "pre_construction" | "post_construction";
 type SurveyStatus = "not_started" | "scheduled" | "in_progress" | "complete";
-type DefectPriority = "low" | "medium" | "high" | "critical";
-type DefectStatus = "open" | "in_progress" | "closed";
-type ReinstatementStatus = "not_started" | "in_progress" | "complete";
-type FileCategory = "pre_construction" | "post_construction" | "defects" | "reinstatement" | "closeout";
+type FileCategory = "pre_construction" | "post_construction" | "closeout";
 
 type LotRow = {
   id: string;
   lot_number: string;
   address: string | null;
-  landholder: string | null;
-  landholder_contact: string | null;
+  landholder_id: string | null;
   chainage: string | null;
   chainage_m: number | null;
   status: LotStatus;
@@ -74,8 +70,7 @@ export type Database = {
           id?: string;
           lot_number: string;
           address?: string | null;
-          landholder?: string | null;
-          landholder_contact?: string | null;
+          landholder_id?: string | null;
           chainage?: string | null;
           status?: LotStatus;
           assigned_engineer?: string | null;
@@ -87,8 +82,7 @@ export type Database = {
         Update: {
           lot_number?: string;
           address?: string | null;
-          landholder?: string | null;
-          landholder_contact?: string | null;
+          landholder_id?: string | null;
           chainage?: string | null;
           status?: LotStatus;
           assigned_engineer?: string | null;
@@ -132,55 +126,13 @@ export type Database = {
           { foreignKeyName: "surveys_lot_id_fkey"; columns: ["lot_id"]; isOneToOne: false; referencedRelation: "lots"; referencedColumns: ["id"] },
         ];
       };
-      defects: {
+      landholders: {
         Row: {
           id: string;
-          ref: number;
-          lot_id: string;
-          description: string;
-          priority: DefectPriority;
-          status: DefectStatus;
-          assigned_to: string | null;
-          due_date: string | null;
-          notes: string | null;
-          closed_at: string | null;
-          created_at: string;
-          created_by: string | null;
-          updated_at: string;
-          updated_by: string | null;
-        };
-        Insert: {
-          id?: string;
-          lot_id: string;
-          description: string;
-          priority?: DefectPriority;
-          status?: DefectStatus;
-          assigned_to?: string | null;
-          due_date?: string | null;
-          notes?: string | null;
-        };
-        Update: {
-          description?: string;
-          priority?: DefectPriority;
-          status?: DefectStatus;
-          assigned_to?: string | null;
-          due_date?: string | null;
-          notes?: string | null;
-        };
-        Relationships: [
-          { foreignKeyName: "defects_lot_id_fkey"; columns: ["lot_id"]; isOneToOne: false; referencedRelation: "lots"; referencedColumns: ["id"] },
-        ];
-      };
-      reinstatement_items: {
-        Row: {
-          id: string;
-          ref: number;
-          lot_id: string;
-          required_works: string;
-          status: ReinstatementStatus;
-          completion_date: string | null;
-          landholder_accepted: boolean;
-          landholder_accepted_date: string | null;
+          name: string;
+          phone: string | null;
+          email: string | null;
+          postal_address: string | null;
           notes: string | null;
           created_at: string;
           created_by: string | null;
@@ -189,31 +141,20 @@ export type Database = {
         };
         Insert: {
           id?: string;
-          lot_id: string;
-          required_works: string;
-          status?: ReinstatementStatus;
-          completion_date?: string | null;
-          landholder_accepted?: boolean;
-          landholder_accepted_date?: string | null;
+          name: string;
+          phone?: string | null;
+          email?: string | null;
+          postal_address?: string | null;
           notes?: string | null;
         };
         Update: {
-          required_works?: string;
-          status?: ReinstatementStatus;
-          completion_date?: string | null;
-          landholder_accepted?: boolean;
-          landholder_accepted_date?: string | null;
+          name?: string;
+          phone?: string | null;
+          email?: string | null;
+          postal_address?: string | null;
           notes?: string | null;
         };
-        Relationships: [
-          {
-            foreignKeyName: "reinstatement_items_lot_id_fkey";
-            columns: ["lot_id"];
-            isOneToOne: false;
-            referencedRelation: "lots";
-            referencedColumns: ["id"];
-          },
-        ];
+        Relationships: [];
       };
       attachments: {
         Row: {
@@ -221,8 +162,6 @@ export type Database = {
           lot_id: string;
           category: FileCategory;
           survey_id: string | null;
-          defect_id: string | null;
-          reinstatement_id: string | null;
           storage_path: string;
           preview_path: string | null;
           file_name: string;
@@ -238,8 +177,6 @@ export type Database = {
           lot_id: string;
           category: FileCategory;
           survey_id?: string | null;
-          defect_id?: string | null;
-          reinstatement_id?: string | null;
           storage_path: string;
           preview_path?: string | null;
           file_name: string;
@@ -277,14 +214,16 @@ export type Database = {
     Views: {
       lot_overview: {
         Row: LotRow & {
+          landholder_name: string | null;
+          landholder_phone: string | null;
+          landholder_email: string | null;
           pre_survey_status: SurveyStatus;
           pre_survey_date: string | null;
+          pre_surveyor: string | null;
           post_survey_status: SurveyStatus;
           post_survey_date: string | null;
-          open_defects: number;
-          total_defects: number;
-          open_reinstatement: number;
-          total_reinstatement: number;
+          post_surveyor: string | null;
+          file_count: number;
           ready_to_close: boolean;
         };
         Relationships: [];
@@ -305,9 +244,6 @@ export type Database = {
       lot_status: LotStatus;
       survey_type: SurveyType;
       survey_status: SurveyStatus;
-      defect_priority: DefectPriority;
-      defect_status: DefectStatus;
-      reinstatement_status: ReinstatementStatus;
       file_category: FileCategory;
     };
     CompositeTypes: Record<string, never>;

@@ -1,26 +1,20 @@
 // The four PDF reports. Each takes plain data and returns a react-pdf document.
 import { Text, View } from "@react-pdf/renderer";
 import type { ChecklistItem } from "@/lib/closeout";
-import {
-  DEFECT_PRIORITIES,
-  DEFECT_STATUSES,
-  labelFor,
-  LOT_STATUSES,
-  REINSTATEMENT_STATUSES,
-  SURVEY_STATUSES,
-  SURVEY_TYPES,
-} from "@/lib/constants";
+import { labelFor, LOT_STATUSES, SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
 import type { LotOverview } from "@/lib/data";
 import type { Enums, Tables } from "@/lib/database.types";
-import { defectRef, formatDate, reinstatementRef } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { KeyValues, Notes, Photos, Report, Section, Stats, styles, Table, type PdfPhoto } from "./kit";
 
 type Meta = { project: string; generatedBy: string };
 type Survey = Tables<"surveys">;
-type Defect = Tables<"defects">;
-type Reinstatement = Tables<"reinstatement_items">;
+type Landholder = Tables<"landholders">;
 
 const surveyLabel = (t: Enums<"survey_type">) => SURVEY_TYPES.find((s) => s.value === t)?.label ?? t;
+
+const surveyCell = (status: Enums<"survey_status">, date: string | null) =>
+  `${labelFor(SURVEY_STATUSES, status)}${date ? `\n${formatDate(date)}` : ""}`;
 
 function lotDetails(lot: LotOverview): [string, string | null][] {
   return [
@@ -28,52 +22,25 @@ function lotDetails(lot: LotOverview): [string, string | null][] {
     ["Status", labelFor(LOT_STATUSES, lot.status)],
     ["Property address", lot.address],
     ["Chainage", lot.chainage],
-    ["Landholder", lot.landholder],
-    ["Landholder contact", lot.landholder_contact],
+    ["Landholder", lot.landholder_name],
+    ["Landholder contact", [lot.landholder_phone, lot.landholder_email].filter(Boolean).join(" / ") || null],
     ["Assigned engineer", lot.assigned_engineer],
     ["Closed", lot.closed_at ? formatDate(lot.closed_at) : null],
   ];
 }
 
-function defectRows(defects: Defect[]) {
-  return defects.map((d) => [
-    defectRef(d.ref),
-    d.description,
-    labelFor(DEFECT_PRIORITIES, d.priority),
-    labelFor(DEFECT_STATUSES, d.status),
-    d.assigned_to,
-    formatDate(d.due_date),
-    formatDate(d.closed_at),
-  ]);
+function Acceptance({ lot }: { lot: LotOverview }) {
+  return lot.landholder_signoff_date ? (
+    <>
+      <Text>
+        Accepted by {lot.landholder_signoff_name ?? "the landholder"} on {formatDate(lot.landholder_signoff_date)}.
+      </Text>
+      <Notes text={lot.landholder_signoff_notes} />
+    </>
+  ) : (
+    <Text style={styles.muted}>Not yet recorded.</Text>
+  );
 }
-
-const DEFECT_COLUMNS = [
-  { header: "Ref", width: 9 },
-  { header: "Description", width: 38 },
-  { header: "Priority", width: 10 },
-  { header: "Status", width: 11 },
-  { header: "Assigned to", width: 14 },
-  { header: "Due", width: 11 },
-  { header: "Closed", width: 11 },
-];
-
-function reinstatementRows(items: Reinstatement[]) {
-  return items.map((r) => [
-    reinstatementRef(r.ref),
-    r.required_works + (r.notes ? `\n${r.notes}` : ""),
-    labelFor(REINSTATEMENT_STATUSES, r.status),
-    formatDate(r.completion_date),
-    r.landholder_accepted ? `Yes${r.landholder_accepted_date ? `, ${formatDate(r.landholder_accepted_date)}` : ""}` : "No",
-  ]);
-}
-
-const REINSTATEMENT_COLUMNS = [
-  { header: "Ref", width: 9 },
-  { header: "Required works", width: 47 },
-  { header: "Status", width: 13 },
-  { header: "Completed", width: 13 },
-  { header: "Landholder accepted", width: 18 },
-];
 
 // ------------------------------------------------------------------ Lot report
 
@@ -82,16 +49,12 @@ export function LotReport({
   lot,
   checklist,
   surveys,
-  defects,
-  reinstatement,
   photos,
 }: {
   meta: Meta;
   lot: LotOverview;
   checklist: ChecklistItem[];
   surveys: (Survey & { fileCount: number })[];
-  defects: Defect[];
-  reinstatement: Reinstatement[];
   photos: { title: string; items: PdfPhoto[] }[];
 }) {
   return (
@@ -139,25 +102,8 @@ export function LotReport({
           ))}
       </Section>
 
-      <Section title={`Defects (${defects.filter((d) => d.status !== "closed").length} open of ${defects.length})`}>
-        <Table columns={DEFECT_COLUMNS} rows={defectRows(defects)} empty="No defects recorded." />
-      </Section>
-
-      <Section title="Reinstatement">
-        <Table columns={REINSTATEMENT_COLUMNS} rows={reinstatementRows(reinstatement)} empty="No reinstatement works recorded." />
-      </Section>
-
       <Section title="Landholder acceptance">
-        {lot.landholder_signoff_date ? (
-          <>
-            <Text>
-              Accepted by {lot.landholder_signoff_name ?? "the landholder"} on {formatDate(lot.landholder_signoff_date)}.
-            </Text>
-            <Notes text={lot.landholder_signoff_notes} />
-          </>
-        ) : (
-          <Text style={styles.muted}>Not yet recorded.</Text>
-        )}
+        <Acceptance lot={lot} />
       </Section>
 
       {photos
@@ -194,7 +140,7 @@ export function SurveyReport({
             ["Lot number", lot.lot_number],
             ["Chainage", lot.chainage],
             ["Property address", lot.address],
-            ["Landholder", lot.landholder],
+            ["Landholder", lot.landholder_name],
           ]}
         />
       </Section>
@@ -237,52 +183,72 @@ export function SurveyReport({
   );
 }
 
-// ------------------------------------------------------------------ Reinstatement report
+// ------------------------------------------------------------------ Landholder report
 
-export function ReinstatementReport({
+export function LandholderReport({
   meta,
   groups,
-  photos,
 }: {
   meta: Meta;
-  groups: { lot: LotOverview; items: Reinstatement[] }[];
-  photos?: PdfPhoto[];
+  groups: { landholder: Landholder; lots: LotOverview[] }[];
 }) {
-  const all = groups.flatMap((g) => g.items);
-  const complete = all.filter((r) => r.status === "complete").length;
-  const accepted = all.filter((r) => r.landholder_accepted).length;
+  const lots = groups.flatMap((g) => g.lots);
   return (
-    <Report title="Reinstatement Report" subtitle={groups.length === 1 ? `Lot ${groups[0].lot.lot_number}` : undefined} {...meta}>
+    <Report title="Landholder Report" subtitle={groups.length === 1 ? groups[0].landholder.name : undefined} {...meta}>
       <Stats
         items={[
-          ["Items", all.length],
-          ["Complete", complete],
-          ["Outstanding", all.length - complete],
-          ["Landholder accepted", accepted],
+          ["Landholders", groups.length],
+          ["Lots", lots.length],
+          ["Accepted", lots.filter((l) => l.landholder_signoff_date).length],
+          ["Closed", lots.filter((l) => l.status === "closed").length],
         ]}
       />
-      {groups.length === 0 && <Text style={styles.muted}>No reinstatement works recorded.</Text>}
-      {groups.map(({ lot, items }) => (
-        <Section key={lot.id} title={`Lot ${lot.lot_number}${lot.address ? ` - ${lot.address}` : ""}`}>
-          <Table columns={REINSTATEMENT_COLUMNS} rows={reinstatementRows(items)} />
+      {groups.length === 0 && <Text style={styles.muted}>No landholders.</Text>}
+      {groups.map(({ landholder, lots }) => (
+        <Section key={landholder.id} title={landholder.name}>
+          <KeyValues
+            items={[
+              ["Phone", landholder.phone],
+              ["Email", landholder.email],
+              ["Postal address", landholder.postal_address],
+              ["Lots", String(lots.length)],
+            ]}
+          />
+          <Notes text={landholder.notes} />
+          <View style={{ marginTop: 6 }}>
+            <Table
+              columns={[
+                { header: "Lot", width: 12 },
+                { header: "Address", width: 28 },
+                { header: "Pre-con", width: 15 },
+                { header: "Post-con", width: 15 },
+                { header: "Accepted", width: 15 },
+                { header: "Status", width: 15 },
+              ]}
+              rows={lots.map((l) => [
+                l.lot_number,
+                l.address,
+                surveyCell(l.pre_survey_status, l.pre_survey_date),
+                surveyCell(l.post_survey_status, l.post_survey_date),
+                l.landholder_signoff_date ? formatDate(l.landholder_signoff_date) : "No",
+                labelFor(LOT_STATUSES, l.status),
+              ])}
+              empty="No lots."
+            />
+          </View>
         </Section>
       ))}
-      {photos && photos.length > 0 && (
-        <Section title="Reinstatement photos" breakBefore>
-          <Photos photos={photos} perRow={3} />
-        </Section>
-      )}
     </Report>
   );
 }
 
 // ------------------------------------------------------------------ Project summary
 
-export function SummaryReport({ meta, lots, openDefects }: { meta: Meta; lots: LotOverview[]; openDefects: Defect[] }) {
+export function SummaryReport({ meta, lots }: { meta: Meta; lots: LotOverview[] }) {
   const total = lots.length;
   const pct = (n: number) => (total ? `${n} (${Math.round((n / total) * 100)}%)` : "0");
   const closed = lots.filter((l) => l.status === "closed").length;
-  const lotNumber = new Map(lots.map((l) => [l.id, l.lot_number]));
+  const awaiting = lots.filter((l) => l.post_survey_status === "complete" && !l.landholder_signoff_date && l.status !== "closed");
   return (
     <Report title="Project Summary Report" landscape {...meta}>
       <Stats
@@ -290,8 +256,7 @@ export function SummaryReport({ meta, lots, openDefects }: { meta: Meta; lots: L
           ["Total lots", total],
           ["Pre-con surveys complete", pct(lots.filter((l) => l.pre_survey_status === "complete").length)],
           ["Post-con surveys complete", pct(lots.filter((l) => l.post_survey_status === "complete").length)],
-          ["Open defects", lots.reduce((s, l) => s + l.open_defects, 0)],
-          ["Open reinstatement", lots.reduce((s, l) => s + l.open_reinstatement, 0)],
+          ["Awaiting acceptance", awaiting.length],
           ["Lots closed", pct(closed)],
           ["Lots outstanding", total - closed],
         ]}
@@ -300,38 +265,27 @@ export function SummaryReport({ meta, lots, openDefects }: { meta: Meta; lots: L
         <Table
           columns={[
             { header: "Lot", width: 8 },
-            { header: "Address", width: 22 },
-            { header: "Landholder", width: 14 },
+            { header: "Address", width: 20 },
+            { header: "Landholder", width: 15 },
             { header: "Chainage", width: 8 },
             { header: "Engineer", width: 11 },
-            { header: "Pre-con", width: 9 },
-            { header: "Post-con", width: 9 },
-            { header: "Open defects", width: 7 },
-            { header: "Open reinst.", width: 7 },
-            { header: "Accepted", width: 8 },
+            { header: "Pre-con", width: 10 },
+            { header: "Post-con", width: 10 },
+            { header: "Accepted", width: 9 },
             { header: "Status", width: 9 },
           ]}
           rows={lots.map((l) => [
             l.lot_number,
             l.address,
-            l.landholder,
+            l.landholder_name,
             l.chainage,
             l.assigned_engineer,
-            labelFor(SURVEY_STATUSES, l.pre_survey_status),
-            labelFor(SURVEY_STATUSES, l.post_survey_status),
-            String(l.open_defects),
-            String(l.open_reinstatement),
+            surveyCell(l.pre_survey_status, l.pre_survey_date),
+            surveyCell(l.post_survey_status, l.post_survey_date),
             l.landholder_signoff_date ? formatDate(l.landholder_signoff_date) : "No",
             labelFor(LOT_STATUSES, l.status),
           ])}
           empty="No lots."
-        />
-      </Section>
-      <Section title={`Open defects (${openDefects.length})`}>
-        <Table
-          columns={[{ header: "Lot", width: 8 }, ...DEFECT_COLUMNS]}
-          rows={defectRows(openDefects).map((row, i) => [lotNumber.get(openDefects[i].lot_id) ?? "", ...row])}
-          empty="No open defects."
         />
       </Section>
     </Report>

@@ -48,34 +48,64 @@ describe("accounts", () => {
 
   it("gives inactive accounts no access to records", async () => {
     await db.query("insert into public.lots (lot_number) values ('SEED-1')");
+    await db.query("insert into public.landholders (name) values ('Seed Owner')");
     expect(await as(db, pending)("select * from public.lots")).toHaveLength(0);
+    expect(await as(db, pending)("select * from public.landholders")).toHaveLength(0);
     expect(await viewQ("select * from public.lots")).toHaveLength(1);
     await db.query("delete from public.lots where lot_number = 'SEED-1'");
+    await db.query("delete from public.landholders where name = 'Seed Owner'");
+  });
+});
+
+describe("landholder registry", () => {
+  it("keeps one entry per name, ignoring case and spacing", async () => {
+    await engQ("insert into public.landholders (name, phone) values ('  J   Smith ', '0400 000 000')");
+    const [row] = await viewQ<{ name: string }>("select name from public.landholders");
+    expect(row.name).toBe("J Smith");
+    await expect(pmQ("insert into public.landholders (name) values ('j smith')")).rejects.toThrow(/duplicate key/);
+  });
+
+  it("lets engineers add and edit landholders but only managers delete them", async () => {
+    await engQ("update public.landholders set email = 'js@example.com' where name = 'J Smith'");
+    await expect(viewQ("insert into public.landholders (name) values ('Nope')")).rejects.toThrow(/row-level security/);
+    expect(await engQ("delete from public.landholders where name = 'J Smith' returning id")).toHaveLength(0);
+  });
+
+  it("can't be deleted while lots belong to it", async () => {
+    const [h] = await pmQ<{ id: string }>("insert into public.landholders (name) values ('Temp Owner') returning id");
+    await pmQ("insert into public.lots (lot_number, landholder_id) values ('LOT-TMP', $1)", [h.id]);
+    await expect(pmQ("delete from public.landholders where id = $1", [h.id])).rejects.toThrow(/foreign key/);
+    await pmQ("delete from public.lots where lot_number = 'LOT-TMP'");
+    await pmQ("delete from public.landholders where id = $1", [h.id]);
   });
 });
 
 describe("lot register and import", () => {
-  it("imports lots, skipping duplicates regardless of case", async () => {
+  it("imports lots, matching or adding landholders and skipping duplicate lots", async () => {
     await pmQ("insert into public.lots (lot_number, address) values ('LOT-001', '1 Main St')");
-    const [{ result }] = await pmQ<{ result: { inserted: number; skipped: string[] } }>(
+    const [{ result }] = await pmQ<{ result: { inserted: number; new_landholders: number; skipped: string[] } }>(
       "select public.import_lots($1) as result",
       [
         JSON.stringify([
           { lot_number: " lot-001 ", address: "dupe" },
-          { lot_number: "LOT-002", address: "2 Main St", chainage: "1+250", landholder: "J Smith" },
-          { lot_number: "LOT-003", status: "on_hold" },
+          { lot_number: "LOT-002", address: "2 Main St", chainage: "1+250", landholder: "j smith" },
+          { lot_number: "LOT-003", status: "on_hold", landholder: "New Owner", landholder_contact: "new@example.com" },
+          { lot_number: "LOT-004", landholder: "new  owner" },
         ]),
       ],
     );
-    expect(result).toEqual({ inserted: 2, skipped: ["lot-001"] });
-    const rows = await viewQ<{ lot_number: string; chainage_m: number | null; status: string }>(
-      "select lot_number, chainage_m, status from public.lots order by lot_number",
+    expect(result).toEqual({ inserted: 3, new_landholders: 1, skipped: ["lot-001"] });
+    const rows = await viewQ<{ lot_number: string; chainage_m: number | null; status: string; landholder_name: string | null }>(
+      "select lot_number, chainage_m, status, landholder_name from public.lot_overview order by lot_number",
     );
     expect(rows).toEqual([
-      { lot_number: "LOT-001", chainage_m: null, status: "not_started" },
-      { lot_number: "LOT-002", chainage_m: 1250, status: "not_started" },
-      { lot_number: "LOT-003", chainage_m: null, status: "on_hold" },
+      { lot_number: "LOT-001", chainage_m: null, status: "not_started", landholder_name: null },
+      { lot_number: "LOT-002", chainage_m: 1250, status: "not_started", landholder_name: "J Smith" },
+      { lot_number: "LOT-003", chainage_m: null, status: "on_hold", landholder_name: "New Owner" },
+      { lot_number: "LOT-004", chainage_m: null, status: "not_started", landholder_name: "New Owner" },
     ]);
+    const [owner] = await viewQ<{ email: string }>("select email from public.landholders where name = 'New Owner'");
+    expect(owner.email).toBe("new@example.com");
   });
 
   it("rejects a duplicate lot number typed by hand", async () => {
@@ -103,60 +133,41 @@ describe("lot register and import", () => {
   });
 });
 
-describe("site work", () => {
+describe("surveys and files", () => {
   it("lets engineers complete surveys, which requires a date and surveyor", async () => {
     const lot = await lotId("LOT-002");
     await expect(
       engQ("update public.surveys set status = 'complete' where lot_id = $1 and survey_type = 'pre_construction'", [lot]),
     ).rejects.toThrow(/surveys_complete_needs_details/);
-    await engQ(
-      "update public.surveys set status = 'complete', survey_date = '2026-10-01', surveyor = 'Sam' where lot_id = $1 and survey_type = 'pre_construction'",
+    const [s] = await engQ<{ completed_at: string | null }>(
+      "update public.surveys set status = 'complete', survey_date = '2026-10-01', surveyor = 'Sam' where lot_id = $1 and survey_type = 'pre_construction' returning completed_at",
       [lot],
     );
+    expect(s.completed_at).not.toBeNull();
     const [lotRow] = await viewQ<{ status: string }>("select status from public.lots where id = $1", [lot]);
     expect(lotRow.status).toBe("in_progress");
   });
 
   it("does not let read-only users change surveys", async () => {
-    const lot = await lotId("LOT-002");
-    const rows = await viewQ(
-      "update public.surveys set notes = 'x' where lot_id = $1 returning id",
-      [lot],
-    );
+    const rows = await viewQ("update public.surveys set notes = 'x' where lot_id = $1 returning id", [await lotId("LOT-002")]);
     expect(rows).toHaveLength(0);
   });
 
-  it("lets engineers raise and close defects but not delete them", async () => {
-    const lot = await lotId("LOT-002");
-    const [d] = await engQ<{ id: string; ref: number }>(
-      "insert into public.defects (lot_id, description, priority) values ($1, 'Cracked driveway', 'high') returning id, ref",
-      [lot],
-    );
-    expect(d.ref).toBeGreaterThan(0);
-    const deleted = await engQ("delete from public.defects where id = $1 returning id", [d.id]);
-    expect(deleted).toHaveLength(0);
-    const [closed] = await engQ<{ closed_at: string | null }>(
-      "update public.defects set status = 'closed' where id = $1 returning closed_at",
-      [d.id],
-    );
-    expect(closed.closed_at).not.toBeNull();
-  });
-
   it("controls file uploads by role", async () => {
-    await engQ("insert into storage.objects (bucket_id, name, owner_id) values ('lot-files', 'LOT-002/defects/a.jpg', $1)", [
+    await engQ("insert into storage.objects (bucket_id, name, owner_id) values ('lot-files', 'LOT-002/pre-construction/a.jpg', $1)", [
       engineer,
     ]);
     await expect(
-      viewQ("insert into storage.objects (bucket_id, name, owner_id) values ('lot-files', 'LOT-002/defects/b.jpg', $1)", [
+      viewQ("insert into storage.objects (bucket_id, name, owner_id) values ('lot-files', 'LOT-002/pre-construction/b.jpg', $1)", [
         viewer,
       ]),
     ).rejects.toThrow(/row-level security/);
     const lot = await lotId("LOT-002");
     await engQ(
-      "insert into public.attachments (lot_id, category, storage_path, file_name, mime_type, uploaded_by) values ($1, 'defects', 'LOT-002/defects/a.jpg', 'a.jpg', 'image/jpeg', $2)",
+      "insert into public.attachments (lot_id, category, storage_path, file_name, mime_type, uploaded_by) values ($1, 'pre_construction', 'LOT-002/pre-construction/a.jpg', 'a.jpg', 'image/jpeg', $2)",
       [lot, engineer],
     );
-    const [att] = await viewQ<{ kind: string }>("select kind from public.attachments where storage_path = 'LOT-002/defects/a.jpg'");
+    const [att] = await viewQ<{ kind: string }>("select kind from public.attachments where storage_path = 'LOT-002/pre-construction/a.jpg'");
     expect(att.kind).toBe("photo");
   });
 
@@ -173,31 +184,31 @@ describe("site work", () => {
       ),
     ).rejects.toThrow(/matching survey folder/);
   });
+
+  it("no longer has defect or reinstatement folders", async () => {
+    await expect(
+      engQ(
+        "insert into public.attachments (lot_id, category, storage_path, file_name, uploaded_by) values ($1, 'defects', 'x/d.jpg', 'd.jpg', $2)",
+        [await lotId("LOT-002"), engineer],
+      ),
+    ).rejects.toThrow(/invalid input value for enum/);
+  });
 });
 
 describe("close-out", () => {
   it("lists what is blocking close-out and refuses to close", async () => {
     const lot = await lotId("LOT-002");
-    await engQ("insert into public.reinstatement_items (lot_id, required_works) values ($1, 'Replace fence panels')", [lot]);
     const [{ blockers }] = await viewQ<{ blockers: string[] }>("select public.lot_closeout_blockers($1) as blockers", [lot]);
-    expect(blockers).toEqual([
-      "Post-construction survey is not complete",
-      "Reinstatement works are not complete",
-      "Landholder acceptance has not been recorded",
-    ]);
+    expect(blockers).toEqual(["Post-construction survey is not complete", "Landholder acceptance has not been recorded"]);
     await expect(pmQ("update public.lots set status = 'closed' where id = $1", [lot])).rejects.toThrow(
       /cannot be closed: Post-construction survey/,
     );
   });
 
-  it("closes a lot once every condition is met, then freezes its records", async () => {
+  it("closes a lot once both surveys and acceptance are done, then freezes its records", async () => {
     const lot = await lotId("LOT-002");
     await engQ(
       "update public.surveys set status = 'complete', survey_date = '2026-12-01', surveyor = 'Sam' where lot_id = $1 and survey_type = 'post_construction'",
-      [lot],
-    );
-    await engQ(
-      "update public.reinstatement_items set status = 'complete', completion_date = '2026-12-05', landholder_accepted = true where lot_id = $1",
       [lot],
     );
     await pmQ("update public.lots set landholder_signoff_date = '2026-12-06', landholder_signoff_name = 'J Smith' where id = $1", [lot]);
@@ -212,7 +223,7 @@ describe("close-out", () => {
     expect(closed).toEqual({ status: "closed", closed_by: pm });
 
     await expect(
-      engQ("insert into public.defects (lot_id, description) values ($1, 'Late find')", [lot]),
+      engQ("update public.surveys set notes = 'late note' where lot_id = $1", [lot]),
     ).rejects.toThrow(/is closed/);
     await expect(engQ("delete from public.attachments where lot_id = $1", [lot])).rejects.toThrow(/is closed/);
 
@@ -230,7 +241,10 @@ describe("close-out", () => {
       "update public.surveys set status = 'complete', survey_date = '2026-01-01', surveyor = 'S' where lot_id = $1",
       [lot],
     );
-    await engQ("insert into public.attachments (lot_id, category, storage_path, file_name, uploaded_by) values ($1, 'closeout', 'LOT-DEL/closeout/f.pdf', 'f.pdf', $2)", [lot, engineer]);
+    await engQ(
+      "insert into public.attachments (lot_id, category, storage_path, file_name, uploaded_by) values ($1, 'closeout', 'LOT-DEL/closeout/f.pdf', 'f.pdf', $2)",
+      [lot, engineer],
+    );
     await pmQ("update public.lots set landholder_signoff_date = '2026-02-01', landholder_signoff_name = 'X' where id = $1", [lot]);
     await pmQ("update public.lots set status = 'closed' where id = $1", [lot]);
     await expect(pmQ("delete from public.lots where id = $1 returning id", [lot])).resolves.toHaveLength(1);
@@ -266,8 +280,44 @@ describe("audit trail", () => {
     });
   });
 
+  it("records landholder changes", async () => {
+    const rows = await viewQ<{ action: string }>("select action from public.audit_log where table_name = 'landholders'");
+    expect(rows.map((r) => r.action)).toContain("INSERT");
+  });
+
   it("cannot be edited by anyone through the API", async () => {
     await expect(pmQ("delete from public.audit_log")).rejects.toThrow(/permission denied/);
     await expect(as(db, admin)("update public.audit_log set actor_name = 'x'")).rejects.toThrow(/permission denied/);
   });
+});
+
+describe("upgrading an existing database", () => {
+  it("moves free-text landholders on lots into the registry", async () => {
+    const old = await createDb({
+      "20261014000000_dilap_focus.sql": async (d) => {
+        await d.exec(`
+          insert into public.lots (lot_number, landholder, landholder_contact) values
+            ('A1', 'Ridge Farming Co', '07 5555 0000'),
+            ('A2', ' ridge  farming co', 'farm@example.com'),
+            ('A3', 'M Patel', 'mp@example.com'),
+            ('A4', null, null);
+          insert into public.defects (lot_id, description) select id, 'x' from public.lots where lot_number = 'A1';`);
+      },
+    });
+    const { rows } = await old.query<{ lot_number: string; name: string | null; phone: string | null; email: string | null }>(
+      `select l.lot_number, h.name, h.phone, h.email from public.lots l
+       left join public.landholders h on h.id = l.landholder_id order by l.lot_number`,
+    );
+    expect(rows).toEqual([
+      { lot_number: "A1", name: "Ridge Farming Co", phone: "07 5555 0000", email: null },
+      { lot_number: "A2", name: "Ridge Farming Co", phone: "07 5555 0000", email: null },
+      { lot_number: "A3", name: "M Patel", phone: null, email: "mp@example.com" },
+      { lot_number: "A4", name: null, phone: null, email: null },
+    ]);
+    const { rows: tables } = await old.query<{ n: number }>(
+      "select count(*)::int n from information_schema.tables where table_schema = 'public' and table_name in ('defects', 'reinstatement_items')",
+    );
+    expect(tables[0].n).toBe(0);
+    await old.close();
+  }, 60_000);
 });

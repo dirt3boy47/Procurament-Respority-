@@ -15,8 +15,7 @@ const TABLES = [
   ["", "All records"],
   ["lots", "Lots"],
   ["surveys", "Surveys"],
-  ["defects", "Defects"],
-  ["reinstatement_items", "Reinstatement"],
+  ["landholders", "Landholders"],
   ["attachments", "Files"],
   ["profiles", "Users"],
 ] as const;

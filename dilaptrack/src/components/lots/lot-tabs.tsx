@@ -4,16 +4,14 @@ import Link from "next/link";
 import { useSelectedLayoutSegments } from "next/navigation";
 import { cn } from "@/lib/utils";
 
-export function LotTabs({ lotId, openDefects, openReinstatement }: { lotId: string; openDefects: number; openReinstatement: number }) {
+export function LotTabs({ lotId, fileCount }: { lotId: string; fileCount: number }) {
   const segments = useSelectedLayoutSegments();
   const current = segments.join("/");
   const tabs = [
     { href: "", label: "Overview" },
     { href: "surveys/pre-construction", label: "Pre-Con Survey" },
     { href: "surveys/post-construction", label: "Post-Con Survey" },
-    { href: "defects", label: "Defects", count: openDefects },
-    { href: "reinstatement", label: "Reinstatement", count: openReinstatement },
-    { href: "files", label: "Files" },
+    { href: "files", label: "Files", count: fileCount },
     { href: "closeout", label: "Close-out" },
     { href: "history", label: "History" },
   ];
@@ -34,9 +32,7 @@ export function LotTabs({ lotId, openDefects, openReinstatement }: { lotId: stri
               >
                 {t.label}
                 {t.count ? (
-                  <span className="rounded-full bg-red-100 px-1.5 text-xs font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
-                    {t.count}
-                  </span>
+                  <span className="rounded-full bg-muted px-1.5 text-xs font-semibold text-muted-fg">{t.count}</span>
                 ) : null}
               </Link>
             </li>

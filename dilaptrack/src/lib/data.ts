@@ -41,7 +41,15 @@ export const lotNumbers = cache(async () => {
   return new Map((data ?? []).map((l) => [l.id, l]));
 });
 
-/** Names of team members, used as suggestions for "assigned to" fields. */
+/** The landholder registry, for pickers. */
+export const listLandholders = cache(async () => {
+  const supabase = await createClient();
+  const { data, error } = await supabase.from("landholders").select("*").order("name");
+  if (error) throw new Error(error.message);
+  return data ?? [];
+});
+
+/** Names of team members, used as suggestions for the assigned engineer. */
 export const teamNames = cache(async () => {
   const supabase = await createClient();
   const { data } = await supabase.from("profiles").select("full_name, role").eq("active", true).order("full_name");

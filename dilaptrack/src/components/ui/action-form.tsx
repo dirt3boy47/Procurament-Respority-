@@ -32,6 +32,9 @@ export function ActionForm({
       className={cn("flex flex-col gap-4", className)}
       onSubmit={(event) => {
         event.preventDefault();
+        // React bubbles events through portals, so a form inside a dialog opened
+        // from another form (e.g. "add landholder" in the lot form) would also submit the outer one.
+        event.stopPropagation();
         const formData = new FormData(event.currentTarget);
         startTransition(async () => {
           const result = await action(formData);

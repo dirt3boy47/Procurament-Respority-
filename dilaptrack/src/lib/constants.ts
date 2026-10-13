@@ -25,31 +25,10 @@ export const SURVEY_STATUSES: Option<Enums<"survey_status">>[] = [
   { value: "complete", label: "Complete", tone: "green" },
 ];
 
-export const DEFECT_PRIORITIES: Option<Enums<"defect_priority">>[] = [
-  { value: "low", label: "Low", tone: "gray" },
-  { value: "medium", label: "Medium", tone: "blue" },
-  { value: "high", label: "High", tone: "amber" },
-  { value: "critical", label: "Critical", tone: "red" },
-];
-
-export const DEFECT_STATUSES: Option<Enums<"defect_status">>[] = [
-  { value: "open", label: "Open", tone: "red" },
-  { value: "in_progress", label: "In progress", tone: "amber" },
-  { value: "closed", label: "Closed", tone: "green" },
-];
-
-export const REINSTATEMENT_STATUSES: Option<Enums<"reinstatement_status">>[] = [
-  { value: "not_started", label: "Not started", tone: "gray" },
-  { value: "in_progress", label: "In progress", tone: "amber" },
-  { value: "complete", label: "Complete", tone: "green" },
-];
-
 /** File folders, in the order they appear under each lot. `slug` is the storage folder name. */
 export const FILE_CATEGORIES: { value: Enums<"file_category">; label: string; slug: string }[] = [
   { value: "pre_construction", label: "Pre-Construction", slug: "pre-construction" },
   { value: "post_construction", label: "Post-Construction", slug: "post-construction" },
-  { value: "defects", label: "Defects", slug: "defects" },
-  { value: "reinstatement", label: "Reinstatement", slug: "reinstatement" },
   { value: "closeout", label: "Closeout", slug: "closeout" },
 ];
 

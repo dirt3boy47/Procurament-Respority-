@@ -33,20 +33,8 @@ export function formatBytes(bytes: number | null | undefined) {
   return `${n.toFixed(n < 10 ? 1 : 0)} ${units[i]}`;
 }
 
-export function defectRef(ref: number) {
-  return `D-${String(ref).padStart(4, "0")}`;
-}
-
-export function reinstatementRef(ref: number) {
-  return `R-${String(ref).padStart(4, "0")}`;
-}
-
 /** Today's date (local) as YYYY-MM-DD, for date inputs. */
 export function todayISO() {
   const d = new Date();
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-}
-
-export function isOverdue(due: string | null | undefined, done: boolean) {
-  return Boolean(due) && !done && due! < todayISO();
 }
