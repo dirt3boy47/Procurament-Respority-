@@ -4,7 +4,6 @@ import type { NextConfig } from "next";
 const nextConfig: NextConfig = {
   // Every page reads the signed-in user's session, so pages render per request
   // (the classic dynamic model) rather than using Cache Components.
-  serverExternalPackages: ["@react-pdf/renderer"],
   // This app lives in a sub-folder of the repository; trace files from here.
   outputFileTracingRoot: path.join(__dirname),
   turbopack: {

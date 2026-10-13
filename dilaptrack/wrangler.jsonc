@@ -1,0 +1,26 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  // DilapTrack on Cloudflare Workers (built with @opennextjs/cloudflare).
+  // Separate from the procurement planner Worker in the repository root.
+  "name": "dilaptrack",
+  "main": ".open-next/worker.js",
+  "compatibility_date": "2026-09-07",
+  "compatibility_flags": ["nodejs_compat"],
+  // Without this, esbuild adds __name() helpers inside functions that Next.js
+  // serialises into inline <script> tags (e.g. the theme script), which then fail in the browser.
+  "keep_names": false,
+  "assets": {
+    "directory": ".open-next/assets",
+    "binding": "ASSETS"
+  },
+  "services": [
+    // Self-reference used by OpenNext; must match "name".
+    { "binding": "WORKER_SELF_REFERENCE", "service": "dilaptrack" }
+  ],
+  // Run the Worker near the Supabase database (each page makes several queries).
+  "placement": { "mode": "smart" },
+  "observability": { "enabled": true }
+  // Public settings (Supabase URL, publishable key) are baked in at build time
+  // from .env.production. The server-only SUPABASE_SECRET_KEY is a Worker secret,
+  // set by the GitHub workflow or with: npx wrangler secret put SUPABASE_SECRET_KEY
+}

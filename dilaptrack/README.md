@@ -4,7 +4,7 @@ Property dilapidation surveys, defects, reinstatement and close-out for a constr
 engineers and project teams. It runs on phones on site and on desktops in the office.
 
 **Stack:** Next.js 16 (App Router, Server Actions) · TypeScript · Tailwind CSS 4 · Supabase (Postgres, Auth,
-Storage, Row Level Security) · Vercel.
+Storage, Row Level Security) · Cloudflare Workers (via OpenNext), or Vercel.
 
 ## What it does
 
@@ -18,7 +18,7 @@ Storage, Row Level Security) · Vercel.
 | **Defects** | Lot, description, photos, priority, status, assigned to, due date. Overdue highlighting. Project-wide register with filters and CSV export. |
 | **Reinstatement** | Required works, status, completion date, photos, landholder acceptance (+ date), notes. Project-wide register. |
 | **Close-out** | A lot can only be closed when the pre-construction survey is complete, the post-construction survey is complete, all defects are closed, all reinstatement is complete and landholder acceptance is recorded. The database enforces this as well as the UI. A closed lot's records are locked until it is reopened. |
-| **Reports (PDF)** | Individual Lot Report, Dilapidation Survey Report (photographic record), Reinstatement Report (project or lot), Project Summary Report. |
+| **Reports (PDF)** | Individual Lot Report, Dilapidation Survey Report (photographic record), Reinstatement Report (project or lot), Project Summary Report. The server returns the report data (permission-checked); the PDF is drawn in the browser, so photo-heavy reports don't hit server CPU limits. |
 | **Audit trail** | Every insert, update and delete on lots, surveys, defects, reinstatement, files and user roles is recorded by a database trigger: who, when, and before → after for each field. History tab per lot, plus a project-wide audit log. The log can't be edited through the app or API. |
 | **Other** | Dark mode (light / dark / system), responsive layout with a bottom tab bar on phones, Australian date formats. |
 
@@ -51,15 +51,15 @@ dilaptrack/
 │   ├── seed.sql                            Demo lots for local development
 │   └── config.toml                         Local Supabase settings
 ├── src/
-│   ├── proxy.ts                            Refreshes the session, sends signed-out users to /login
+│   ├── middleware.ts                       Refreshes the session, sends signed-out users to /login
 │   ├── actions/                            Server Actions (lots, records, users, auth) — all permission-checked
 │   ├── app/
 │   │   ├── (app)/                          Signed-in pages: dashboard, lots/[id]/…, defects, reinstatement, reports, audit, admin/users
-│   │   ├── api/reports/[type]/route.ts     PDF generation (lot | survey | reinstatement | summary)
+│   │   ├── api/reports/[type]/route.ts     Report data as JSON (lot | survey | reinstatement | summary)
 │   │   ├── login, forgot-password, auth/confirm, pending
 │   ├── components/                         UI kit, app shell, file uploader/gallery, lot & record components
 │   ├── lib/                                Supabase clients, auth/permissions, import parsing, close-out rules, formatting
-│   └── reports/                            react-pdf report documents
+│   └── reports/                            react-pdf report documents, drawn in the browser (render.tsx)
 └── tests/
     ├── unit/                               Import validation, storage paths, close-out checklist, CSV
     └── db/                                 Runs the real migration on PGlite and tests RLS, triggers and rules
@@ -114,28 +114,53 @@ npm test          # unit tests + database tests (the real migration on in-proces
 npm run build
 ```
 
-The GitHub workflow `.github/workflows/dilaptrack.yml` runs all four on every push that touches `dilaptrack/`.
+The GitHub workflow `.github/workflows/dilaptrack.yml` runs all four on every push that touches `dilaptrack/`, then deploys (see below).
 
-## Deploying to Vercel
+## Deploying to Cloudflare (current setup)
 
-1. In Vercel, **Add New → Project**, import this GitHub repository and set **Root Directory** to `dilaptrack`.
-   The framework (Next.js) is detected automatically.
-2. Add environment variables (Production and Preview):
+The app runs as a Cloudflare Worker called `dilaptrack`, built with
+[OpenNext for Cloudflare](https://opennext.js.org/cloudflare). It is separate from the procurement planner's Worker.
 
-   | Variable | Value |
-   |---|---|
-   | `NEXT_PUBLIC_SUPABASE_URL` | Project URL (Settings → API) |
-   | `NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY` | Publishable key (or the legacy `anon` key) |
-   | `SUPABASE_SECRET_KEY` | Secret key (or legacy `service_role`). Only needed for inviting users. **Server-only.** |
-   | `NEXT_PUBLIC_SITE_URL` | e.g. `https://dilaptrack.vercel.app` (used in email links) |
-   | `NEXT_PUBLIC_PROJECT_NAME` | Shown on PDF reports, e.g. `Northern Pipeline Upgrade` |
-   | `NEXT_PUBLIC_MAX_UPLOAD_MB` | Optional, default 50 |
+**Automatic deploys:** `.github/workflows/dilaptrack.yml` checks and deploys on every push to `main`. To deploy
+another branch, use **Actions → DilapTrack → Run workflow**. It uses these repository secrets (Settings → Secrets and
+variables → Actions):
 
-3. Deploy. Pushes to the default branch deploy to production; other branches get preview URLs.
-4. Add the production URL to Supabase **Site URL** / **Redirect URLs** (step 3 above).
+| Secret | Purpose |
+|---|---|
+| `CLOUDFLARE_API_TOKEN` | Token with *Edit Cloudflare Workers* permission (shared with the procurement planner) |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID (shared) |
+| `SUPABASE_SECRET_KEY` | Optional. Supabase secret (or `service_role`) key; enables **Invite** on the Users page |
 
-`vercel.json` pins the functions to Sydney (`syd1`) to sit next to a Sydney Supabase project. Change the region if
-your Supabase project is elsewhere.
+The public Supabase settings live in `.env.production` (URL and publishable key, safe to commit). To show your
+project's name on PDF reports, add `NEXT_PUBLIC_PROJECT_NAME=...` there.
+
+**After the first deploy:** the app is at `https://dilaptrack.<your-subdomain>.workers.dev` (Cloudflare dashboard →
+Workers & Pages → dilaptrack). In Supabase → Authentication → URL Configuration, set **Site URL** to that address and
+add `https://dilaptrack.<your-subdomain>.workers.dev/**` to **Redirect URLs**. Otherwise invitation and
+password-reset links point at localhost. You can also add a custom domain to the Worker in Cloudflare.
+
+**From your own computer:** `npx wrangler login`, then `npm run cf:deploy`. Use `npm run cf:preview` to run the
+Worker build locally (reads `.dev.vars`, same format as `.env.local`).
+
+**Plan:** a Next.js app with sign-in and several database queries per page can exceed the Workers Free plan's
+10 ms CPU limit per request, which shows up as Cloudflare error 1102. Workers Paid ($5/month) is recommended. The bundle is
+about 2.4 MB compressed, within both plans' size limits.
+
+**Notes:**
+* Next.js is pinned to 16.3.8, the newest version the OpenNext adapter currently supports.
+* The session hook is `src/middleware.ts` (Edge runtime) rather than Next 16's `proxy.ts`, because Edge
+  middleware is what OpenNext supports on Workers.
+* Smart Placement is on (`wrangler.jsonc`), so the Worker runs near the Supabase database.
+
+## Deploying to Vercel (alternative)
+
+1. In Vercel, **Add New → Project**, import this repository and set **Root Directory** to `dilaptrack`.
+2. Add environment variables `SUPABASE_SECRET_KEY` (server-only), `NEXT_PUBLIC_SITE_URL` and optionally
+   `NEXT_PUBLIC_PROJECT_NAME` / `NEXT_PUBLIC_MAX_UPLOAD_MB`. The Supabase URL and publishable key come from
+   `.env.production`; set them in Vercel too if you want to override them.
+3. Deploy, then add the Vercel URL to Supabase **Site URL** / **Redirect URLs**.
+
+`vercel.json` pins the functions to Sydney (`syd1`). Change the region to match your Supabase project.
 
 ## Importing lots
 

@@ -1,8 +1,7 @@
 "use client";
 
-import { Download, ExternalLink } from "lucide-react";
 import { useState, type ReactNode } from "react";
-import { buttonClasses } from "@/components/ui/button";
+import { ReportButton } from "@/components/report-button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Checkbox, Field, Select } from "@/components/ui/input";
 
@@ -17,7 +16,7 @@ export function ReportCard({
   stages,
   outstandingFilter,
 }: {
-  type: string;
+  type: "lot" | "survey" | "reinstatement" | "summary";
   icon: ReactNode;
   title: string;
   description: string;
@@ -31,11 +30,10 @@ export function ReportCard({
   const [stage, setStage] = useState("");
   const [outstanding, setOutstanding] = useState(false);
 
-  const params = new URLSearchParams();
-  if (lot) params.set("lot", lot);
-  if (stage) params.set("stage", stage);
-  if (outstanding) params.set("status", "outstanding");
-  const href = `/api/reports/${type}?${params}`;
+  const params: Record<string, string> = {};
+  if (lot) params.lot = lot;
+  if (stage) params.stage = stage;
+  if (outstanding) params.status = "outstanding";
   const disabled = needsLot && !lot;
 
   return (
@@ -75,22 +73,12 @@ export function ReportCard({
           <Checkbox checked={outstanding} onChange={(e) => setOutstanding(e.target.checked)} label="Outstanding items only" />
         )}
         <div className="mt-auto flex flex-wrap gap-2">
-          <a
-            href={disabled ? undefined : href}
-            target="_blank"
-            rel="noopener"
-            aria-disabled={disabled}
-            className={buttonClasses("primary", "md", disabled ? "pointer-events-none opacity-50" : undefined)}
-          >
-            <ExternalLink /> Open PDF
-          </a>
-          <a
-            href={disabled ? undefined : `${href}&download=1`}
-            aria-disabled={disabled}
-            className={buttonClasses("secondary", "md", disabled ? "pointer-events-none opacity-50" : undefined)}
-          >
-            <Download /> Download
-          </a>
+          <ReportButton type={type} params={params} variant="primary" disabled={disabled}>
+            Open PDF
+          </ReportButton>
+          <ReportButton type={type} params={params} mode="download" disabled={disabled}>
+            Download
+          </ReportButton>
         </div>
       </CardContent>
     </Card>

@@ -1,8 +1,8 @@
 import Link from "next/link";
-import { ChevronLeft, FileDown, MapPin, Phone, UserRound } from "lucide-react";
+import { ChevronLeft, MapPin, Phone, UserRound } from "lucide-react";
 import { LotTabs } from "@/components/lots/lot-tabs";
 import { StatusBadge } from "@/components/ui/badge";
-import { buttonClasses } from "@/components/ui/button";
+import { ReportButton } from "@/components/report-button";
 import { requireSession } from "@/lib/auth";
 import { LOT_STATUSES } from "@/lib/constants";
 import { getLot } from "@/lib/data";
@@ -49,9 +49,9 @@ export default async function LotLayout({ children, params }: LayoutProps<"/lots
             {lot.chainage && <span>CH {lot.chainage}</span>}
           </div>
         </div>
-        <a href={`/api/reports/lot?lot=${lot.id}`} target="_blank" rel="noopener" className={buttonClasses("secondary", "md", "no-print")}>
-          <FileDown /> Lot report
-        </a>
+        <ReportButton type="lot" params={{ lot: lot.id }} className="no-print">
+          Lot report
+        </ReportButton>
       </div>
       <LotTabs lotId={lot.id} openDefects={lot.open_defects} openReinstatement={lot.open_reinstatement} />
       <div className="pt-5">{children}</div>

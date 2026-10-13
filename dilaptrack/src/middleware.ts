@@ -1,7 +1,9 @@
 import type { NextRequest } from "next/server";
 import { updateSession } from "@/lib/supabase/proxy";
 
-export async function proxy(request: NextRequest) {
+// Kept as `middleware` (Edge runtime) rather than Next 16's `proxy` (Node.js
+// runtime) because Edge middleware is what OpenNext supports on Cloudflare Workers.
+export async function middleware(request: NextRequest) {
   return updateSession(request);
 }
 

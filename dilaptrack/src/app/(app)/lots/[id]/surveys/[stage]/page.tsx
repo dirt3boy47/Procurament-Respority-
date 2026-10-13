@@ -1,8 +1,8 @@
 import { notFound } from "next/navigation";
-import { FileDown, Lock } from "lucide-react";
+import { Lock } from "lucide-react";
 import { FileSection } from "@/components/files/file-section";
 import { StatusBadge } from "@/components/ui/badge";
-import { buttonClasses } from "@/components/ui/button";
+import { ReportButton } from "@/components/report-button";
 import { Card, CardContent, CardHeader } from "@/components/ui/card";
 import { requireSession } from "@/lib/auth";
 import { SURVEY_STATUSES, SURVEY_TYPES } from "@/lib/constants";
@@ -46,14 +46,9 @@ export default async function SurveyPage({ params }: PageProps<"/lots/[id]/surve
           actions={
             <>
               <StatusBadge options={SURVEY_STATUSES} value={survey.status} />
-              <a
-                href={`/api/reports/survey?lot=${lot.id}&stage=${type.value}`}
-                target="_blank"
-                rel="noopener"
-                className={buttonClasses("ghost", "sm")}
-              >
-                <FileDown /> Survey report
-              </a>
+              <ReportButton type="survey" params={{ lot: lot.id, stage: type.value }} variant="ghost" size="sm">
+                Survey report
+              </ReportButton>
             </>
           }
         />

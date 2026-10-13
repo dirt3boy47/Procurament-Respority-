@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
-import { FileDown } from "lucide-react";
 import { ReinstatementRegister } from "@/components/records/registers";
-import { buttonClasses } from "@/components/ui/button";
+import { ReportButton } from "@/components/report-button";
 import { PageHeader } from "@/components/ui/page-header";
 import { requireSession } from "@/lib/auth";
 import { lotNumbers } from "@/lib/data";
@@ -22,9 +21,7 @@ export default async function ReinstatementPage() {
         title="Reinstatement register"
         description="Works to return each property to its pre-construction condition."
         actions={
-          <a href="/api/reports/reinstatement" target="_blank" rel="noopener" className={buttonClasses("secondary")}>
-            <FileDown /> PDF report
-          </a>
+          <ReportButton type="reinstatement">PDF report</ReportButton>
         }
       />
       <ReinstatementRegister

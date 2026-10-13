@@ -31,3 +31,54 @@ jobs:
       # Unit tests plus the database schema and Row Level Security tests (PGlite, in-process)
       - run: npm test
       - run: npm run build
+
+  deploy:
+    # Deploys the `dilaptrack` Cloudflare Worker on every push to main, or from
+    # any branch when run by hand (Actions -> DilapTrack -> Run workflow).
+    # Uses the same CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID repository
+    # secrets as the procurement planner. Optional secret SUPABASE_SECRET_KEY
+    # enables inviting users from the app.
+    needs: check
+    if: (github.ref == 'refs/heads/main' && github.event_name == 'push') || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    concurrency: dilaptrack-deploy
+    env:
+      HAS_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN != '' }}
+    steps:
+      - name: Skip - Cloudflare secrets not set
+        if: env.HAS_TOKEN != 'true'
+        working-directory: .
+        run: echo "::notice::Add CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID repository secrets to enable deploys."
+      - uses: actions/checkout@v4
+        if: env.HAS_TOKEN == 'true'
+      - uses: actions/setup-node@v4
+        if: env.HAS_TOKEN == 'true'
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: dilaptrack/package-lock.json
+      - run: npm ci
+        if: env.HAS_TOKEN == 'true'
+      # Public settings come from dilaptrack/.env.production.
+      - name: Build for Cloudflare
+        if: env.HAS_TOKEN == 'true'
+        run: npx opennextjs-cloudflare build
+      - name: Deploy Worker
+        if: env.HAS_TOKEN == 'true'
+        env:
+          RAW_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          RAW_ACCOUNT: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+          SUPABASE_SECRET_KEY: ${{ secrets.SUPABASE_SECRET_KEY }}
+        run: |
+          # Accept a pasted "Authorization: Bearer <token>" snippet and strip stray whitespace.
+          if printf '%s' "$RAW_TOKEN" | grep -q 'Bearer '; then
+            RAW_TOKEN=$(printf '%s' "$RAW_TOKEN" | grep -o 'Bearer [A-Za-z0-9_-]*' | head -n1 | cut -d' ' -f2)
+          fi
+          export CLOUDFLARE_API_TOKEN=$(printf '%s' "$RAW_TOKEN" | tr -d '[:space:]')
+          export CLOUDFLARE_ACCOUNT_ID=$(printf '%s' "$RAW_ACCOUNT" | tr -d '[:space:]')
+          npx opennextjs-cloudflare deploy
+          if [ -n "$SUPABASE_SECRET_KEY" ]; then
+            printf '%s' "$SUPABASE_SECRET_KEY" | tr -d '[:space:]' | npx wrangler secret put SUPABASE_SECRET_KEY
+          else
+            echo "::notice::SUPABASE_SECRET_KEY repository secret not set - inviting users from the app is disabled."
+          fi

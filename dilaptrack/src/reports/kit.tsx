@@ -1,8 +1,10 @@
 // Building blocks shared by every PDF report (A4, Helvetica, no external fonts).
+// Reports are rendered in the browser (see render.tsx), so this runs client-side.
 import { Document, Image, Page, StyleSheet, Text, View } from "@react-pdf/renderer";
 import type { ReactNode } from "react";
 
-export type PdfPhoto = { data: Buffer; format: "jpg" | "png"; caption: string };
+/** A photo for a report. `src` is a URL (a signed Storage URL, or a blob: URL once downloaded). */
+export type PdfPhoto = { src: string; caption: string };
 
 const C = { ink: "#0f172a", muted: "#64748b", line: "#e2e8f0", soft: "#f1f5f9", brand: "#0f6cbd", ok: "#047857", bad: "#b91c1c" };
 
@@ -135,7 +137,7 @@ export function Photos({ photos, perRow = 3 }: { photos: PdfPhoto[]; perRow?: 2 
       {photos.map((p, i) => (
         <View key={i} style={{ width, padding: 4 }} wrap={false}>
           {/* eslint-disable-next-line jsx-a11y/alt-text -- react-pdf Image has no alt */}
-          <Image src={{ data: p.data, format: p.format }} style={{ width: "100%", height, objectFit: "contain", backgroundColor: C.soft }} />
+          <Image src={p.src} style={{ width: "100%", height, objectFit: "contain", backgroundColor: C.soft }} />
           <Text style={{ fontSize: 7, color: C.muted, marginTop: 2 }}>{p.caption}</Text>
         </View>
       ))}
